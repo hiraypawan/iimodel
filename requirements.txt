@@ -1,0 +1,31 @@
+# ===================================================================
+# II v12 — Dependencies
+# ===================================================================
+
+# --- Core dependencies (always needed) ---
+flask>=3.0.0
+flask-cors>=4.0.0
+networkx>=3.1
+duckduckgo-search>=4.1.0
+trafilatura>=1.6.0
+playwright>=1.40.0
+
+# --- Cross-language codebase graph (v12) ---
+tree-sitter>=0.24.0
+tree-sitter-python>=0.24.0
+tree-sitter-javascript>=0.24.0
+tree-sitter-typescript>=0.24.0
+
+# --- Real model backend (llama-cpp-python loads the GGUF locally) ---
+# NOTE: Installed separately in INSTALL_AND_RUN.bat / start.bat with --prefer-binary
+# because building from source requires Visual Studio C++ Build Tools.
+# Use Python 3.11 for best wheel compatibility on Windows.
+# llama-cpp-python>=0.2.0
+
+# --- Optional v12 God-Tier dependencies ---
+# z3-solver>=4.12.0.0       # ii_smt.py — PhD-level math (install: pip install z3-solver)
+# torch>=2.0.0              # ii_vision.py — MobileCLIP (install: pip install torch)
+# transformers>=4.30.0      # ii_vision.py — MobileCLIP (install: pip install transformers)
+# Pillow>=10.0.0            # ii_vision.py — image processing (install: pip install Pillow)
+# mypy>=1.5.0               # ii_blackboard.py — static type checking (install: pip install mypy)
+# sentence-transformers>=2.7.0  # ii_agent.py — deterministic tool router embeddings

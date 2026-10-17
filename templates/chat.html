@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>II — Local AI Agent</title>
+<style>
+  :root {
+    --bg: #0b0c10;
+    --panel: #12141d;
+    --input: #1c1f2b;
+    --accent: #64ffda;
+    --muted: #8a94a6;
+    --text: #e6edf3;
+    --user-bg: #1f2937;
+    --ii-bg: #161b22;
+    --code-bg: #0d1117;
+    --border: #2d3442;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .dot { width: 8px; height: 8px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px var(--accent); }
+  h1 { font-size: 15px; letter-spacing: 0.5px; font-weight: 600; color: var(--accent); }
+  .sub { font-size: 11px; color: var(--muted); margin-left: 6px; }
+
+  main { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+  .msg { max-width: 720px; display: flex; flex-direction: column; gap: 6px; }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.ii { align-self: flex-start; align-items: flex-start; }
+  .bubble {
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .msg.user .bubble { background: var(--user-bg); border: 1px solid var(--border); color: var(--text); }
+  .msg.ii .bubble { background: var(--ii-bg); border: 1px solid var(--border); color: var(--text); }
+  .meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+  code {
+    font-family: "Consolas", "Monaco", "Courier New", monospace;
+    font-size: 12.5px;
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  pre.code-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 8px 0;
+    overflow-x: auto;
+    position: relative;
+  }
+  pre.code-block code {
+    display: block;
+    padding: 0;
+    background: transparent;
+    white-space: pre;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .copy-btn {
+    position: absolute;
+    top: 8px; right: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+  .typing { font-style: italic; color: var(--muted); font-size: 13px; }
+
+  footer {
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    padding: 14px 20px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  #input {
+    flex: 1;
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 10px 14px;
+    font-size: 14px;
+    outline: none;
+  }
+  #input:focus { border-color: var(--accent); }
+  #input::placeholder { color: var(--muted); }
+  button.send {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 8px;
+    padding: 0 22px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  button.send:hover { filter: brightness(1.1); }
+  button.send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .hint {
+    font-size: 11px; color: var(--muted); margin-bottom: 4px;
+  }
+  .empty-state { color: var(--muted); font-size: 13px; text-align: center; margin-top: 60px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="dot"></div>
+  <h1>II<span class="sub">·Local Agent · models/qwen2.5-1.5b-instruct-q4_0.gguf · No cloud</span></h1>
+</header>
+
+<main id="chat">
+  <div class="empty-state" id="empty">Say something to II. It can search the web, run Python, and inspect this codebase.</div>
+</main>
+
+<footer>
+  <input type="text" id="input" placeholder="Ask II to build, fix, search, or run code..." autocomplete="off">
+  <button class="send" id="send">Send</button>
+</footer>
+
+<script>
+const chat = document.getElementById('chat');
+const input = document.getElementById('input');
+const send = document.getElementById('send');
+const empty = document.getElementById('empty');
+
+function scrollBottom(){ chat.scrollTop = chat.scrollHeight; }
+
+function addMessage(role, text, meta){
+  if(empty) empty.style.display='none';
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = text;
+  div.appendChild(bubble);
+  if(meta){ const m=document.createElement('div'); m.className='meta'; m.textContent=meta; div.appendChild(m); }
+  chat.appendChild(div);
+  scrollBottom();
+}
+
+function addCodeBlock(code){
+  const div = document.createElement('div');
+  div.className = 'msg ii';
+  const pre = document.createElement('pre');
+  pre.className = 'code-block';
+  const btn = document.createElement('button');
+  btn.className='copy-btn'; btn.textContent='Copy';
+  btn.onclick = () => { navigator.clipboard.writeText(code); btn.textContent='Copied!'; setTimeout(()=>btn.textContent='Copy',1200); };
+  pre.appendChild(btn);
+  const codeEl = document.createElement('code');
+  codeEl.textContent = code;
+  pre.appendChild(codeEl);
+  div.appendChild(pre);
+  chat.appendChild(div);
+  scrollBottom();
+}
+
+function setTyping(on){
+  let t = document.getElementById('typing');
+  if(on && !t){
+    t = document.createElement('div'); t.id='typing'; t.className='msg ii'; t.innerHTML='<div class="bubble typing">II is thinking…</div>';
+    chat.appendChild(t);
+  } else if(!on && t){ t.remove(); }
+  scrollBottom();
+}
+
+async function sendMessage(){
+  const text = input.value.trim();
+  if(!text) return;
+  input.value='';
+  addMessage('user', text);
+  setTyping(true);
+  try{
+    const res = await fetch('/api/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message: text})
+    });
+    const data = await res.json();
+    setTyping(false);
+    if(data.error){ addMessage('ii','Error: '+data.error); return; }
+    const response = data.response || '';
+    addMessage('ii', response);
+    // render code blocks
+    const fenceRe = /```python\s*\n([\s\S]*?)\n```/g;
+    let m;
+    while((m = fenceRe.exec(response)) !== null){
+      addCodeBlock(m[1]);
+    }
+  }catch(e){
+    setTyping(false);
+    addMessage('ii','Could not reach the II server. Is it running?');
+  }
+}
+
+send.onclick = sendMessage;
+input.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); } });
+input.focus();
+scrollBottom();
+</script>
+</body>
+</html>

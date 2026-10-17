@@ -1,0 +1,47 @@
+# =============================================================================
+# .gitignore — II v12 Internet Intelligence
+# =============================================================================
+
+# --- Large binaries (DO NOT COMMIT) ---
+models/*.gguf
+models/*.bin
+*.zip
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+venv3/
+env/
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- II state / runtime ---
+.ii_state/
+.blackboard.json
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Logs ---
+*.log
+npm-debug.log*
