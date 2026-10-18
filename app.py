@@ -54,6 +54,9 @@ from ii_web import (  # noqa: E402
     read_url,
     fetch_url_metadata,
     format_source_tag,
+    ResearchEngine,
+    research_and_answer,
+    verify_answer_citations,
 )
 from ii_state import StateManager  # noqa: E402
 from ii_constraints import ConstraintSharder, default_constraints  # noqa: E402
@@ -128,7 +131,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search DuckDuckGo for current information",
+            "description": "Search the web (Tavily > SearXNG > DuckDuckGo). Returns citation-tagged results.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
@@ -140,11 +143,23 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "read_url",
-            "description": "Fetch a URL and extract readable text",
+            "description": "Fetch a URL and extract readable text with evidence passages.",
             "parameters": {
                 "type": "object",
                 "properties": {"url": {"type": "string"}},
                 "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "research",
+            "description": "Run a full research pipeline: search + fetch + extract evidence + detect conflicts. Returns sources, passages, and conflicts with citation IDs.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
             },
         },
     },
@@ -250,13 +265,22 @@ The repository index below is approximate and may omit symbols:
 {repository_index}
 
 You also have these tools (call them by name when helpful):
-- search_web(query): Search the web; this sends a request to an external service
+- search_web(query): Search the web (Tavily > SearXNG > DuckDuckGo). Returns citation-tagged results like [1], [2].
 - read_url(url): Return source URLs and extracted passages for review; this is not fact-checking
+- research(query): Run a full research pipeline: search + fetch + extract evidence + detect conflicts. Returns sources, passages, and conflicts with citation IDs.
 - execute_code(code): Run Python as a local subprocess; it is not isolated
 {smt_tool}
 {synth_tool}
 {vision_tool}
 - blackboard(action, payload): Experimental interface store and inspector
+
+CITATION RULES (MANDATORY for web-derived answers):
+  1. Every factual claim from the web MUST carry a citation [1], [2], etc.
+  2. Citation IDs come from the search results provided in tool output.
+  3. Do not invent citation IDs that were not returned by tools.
+  4. If sources conflict, state the conflict and cite both sides.
+  5. If no source supports a claim, say "insufficient evidence".
+  6. Before finalizing, re-read your answer and verify every [n] maps to a real source returned by the search tool.
 
 Guidance:
 1. State uncertainty and verify important claims.
@@ -265,6 +289,7 @@ Guidance:
 4. The synthesis helper searches a limited expression set; it is not general-purpose.
 5. Do not describe local subprocess execution as a sandbox.
 6. Keep answers concise and useful.
+7. ALWAYS cite web sources. Uncited web claims will be rejected.
 
 {decision_context}
 {constraint_context}
@@ -308,6 +333,9 @@ def dispatch_tool(name: str, args: dict) -> str:
         return search_web(args["query"])
     if name == "read_url":
         return read_url(args["url"])
+    if name == "research":
+        result = research_and_answer(args.get("query", ""))
+        return json.dumps(result, ensure_ascii=False, default=str)
     if name == "execute_code":
         success, output = execute_code(args["code"])
         return f"OK: {output}" if success else f"ERROR: {output}"
@@ -405,6 +433,9 @@ def api_chat():
     sys_prompt = build_system_prompt()
 
     final_text = ""
+    research_sources: dict[str, dict] = {}
+    citation_verification: dict | None = None
+
     for _ in range(10):
         resp = MODEL.chat(
             messages=[{"role": "system", "content": sys_prompt}] + messages,
@@ -421,6 +452,15 @@ def api_chat():
                 if isinstance(args, str):
                     args = json.loads(args)
                 observation = dispatch_tool(fn, args)
+
+                # Cache research sources for citation verification
+                if fn == "research":
+                    try:
+                        research_data = json.loads(observation)
+                        research_sources = research_data.get("sources", {})
+                    except json.JSONDecodeError:
+                        pass
+
                 messages.append(
                     {
                         "role": "tool",
@@ -435,11 +475,37 @@ def api_chat():
         messages.append({"role": "assistant", "content": final_text})
         break
 
+    # Self-verification: check citations against sources
+    citation_verification = verify_answer_citations(final_text, research_sources)
+
+    # If citations are missing, ask model to fix (up to 3 rounds)
+    fix_rounds = 0
+    while not citation_verification["verified"] and fix_rounds < 3:
+        fix_rounds += 1
+        fix_prompt = (
+            f"Your answer has missing or invalid citations: {citation_verification['missing_citations']}.\n"
+            f"Available sources: {json.dumps({k: v for k, v in research_sources.items() if k in citation_verification.get('unused_sources', [])}, ensure_ascii=False)}\n"
+            f"Please rewrite your answer with correct citations [1], [2], etc. "
+            f"Only cite sources that were returned by the search tool.\n"
+            f"Original answer:\n{final_text}"
+        )
+        resp = MODEL.chat(
+            messages=[{"role": "system", "content": sys_prompt}] + messages + [{"role": "user", "content": fix_prompt}],
+            tools=None,
+            temperature=0.2,
+        )
+        final_text = resp.get("content", "") or ""
+        citation_verification = verify_answer_citations(final_text, research_sources)
+
     code = extract_code_block(final_text)
     if code:
         STATE.append_scratchpad(f"Generated code block ({len(code)} chars)")
 
-    return jsonify({"response": final_text})
+    return jsonify({
+        "response": final_text,
+        "citation_verification": citation_verification,
+        "research_sources": research_sources,
+    })
 
 
 @app.route("/api/build", methods=["POST"])
@@ -582,6 +648,29 @@ def api_search():
     data = request.get_json(force=True) or {}
     query = data.get("query", "")
     return jsonify({"results": search_web(query)})
+
+
+@app.route("/api/research", methods=["POST"])
+def api_research():
+    """Run the full research pipeline: search + fetch + extract + detect conflicts."""
+    data = request.get_json(force=True) or {}
+    query = data.get("query", "")
+    if not query:
+        return jsonify({"error": "empty query"}), 400
+    result = research_and_answer(query)
+    return jsonify(result)
+
+
+@app.route("/api/verify-citations", methods=["POST"])
+def api_verify_citations():
+    """Check that every [n] citation in an answer maps to a real source."""
+    data = request.get_json(force=True) or {}
+    answer = data.get("answer", "")
+    sources = data.get("sources", {})
+    if not answer:
+        return jsonify({"error": "empty answer"}), 400
+    result = verify_answer_citations(answer, sources)
+    return jsonify(result)
 
 
 @app.route("/api/fetch", methods=["POST"])

@@ -1,12 +1,14 @@
 """
-II command-line agent prototype.
+II v12 agent — with Internet-as-Brain research pipeline.
 
-This module combines a local model backend with optional helper tools. Its
-keyword-based tool hint is a lightweight heuristic, not a guarantee that the
-model will call the right tool. Some tools are prototypes.
+Adds:
+  - Multi-backend web search (Tavily > SearXNG > DuckDuckGo)
+  - Citation enforcement ([1], [2], etc.)
+  - Multi-step research loop (search → fetch → verify → synthesize)
+  - Self-verification before output (claims checked against cited sources)
 
-Web search and URL fetching make external network requests; Python execution is
-performed in the current user's environment and is not isolated.
+All web lookups are explicitly marked as unverified retrieval; the model must
+cite sources and the system flags unverified claims.
 """
 
 from __future__ import annotations
@@ -16,11 +18,21 @@ import tempfile
 import os
 import subprocess
 import sys
+import re
+from typing import Optional
 
 from ii_graph import CodebaseKnowledgeGraph
 from graph.topology import GraphTopologyAnalyzer
 from reasoning.verification_cascade import VerificationCascade
-from ii_web import search_web, fetch_evidence, candidate_contradictions
+from ii_web import (
+    search_web,
+    read_url,
+    fetch_url_metadata,
+    format_source_tag,
+    ResearchEngine,
+    research_and_answer,
+    verify_answer_citations,
+)
 from ii_smt import smt_math_tool
 from ii_synthesis import EnumerativeSynthesizer, synthesis_tool
 from ii_blackboard import (
@@ -54,17 +66,22 @@ _TOOL_KEYWORDS = {
     "search_web": (
         "search", "look up", "find info", "current", "latest", "news",
         "what is", "who is", "where is", "tell me about",
-        "information on", "details on", "duckduckgo"
+        "information on", "details on", "duckduckgo", "tavily", "searxng"
     ),
     "read_url": (
         "http://", "https://", "fetch", "read url", "extract",
         "trafilatura", "webpage"
+    ),
+    "research": (
+        "research", "investigate", "deep dive", "fact-check", "verify claim",
+        "source", "cite", "evidence", "bibliography", "references"
     ),
     "execute_code": (
         "run", "execute", "python script", "run code", "test this",
         "debug", "fix this code", "sandbox", "subprocess"
     ),
 }
+
 
 def keyword_tool_hint(user_prompt: str, available_tool_names: list) -> str | None:
     """Return the highest-scoring keyword match as a non-binding hint."""
@@ -94,6 +111,7 @@ architecture_map = GraphTopologyAnalyzer(kg.graph).generate_architecture_map(max
 synthesizer = EnumerativeSynthesizer()
 blackboard = Blackboard(_WORKDIR)
 architect = BlackboardArchitect(blackboard)
+research_engine = ResearchEngine()
 
 # Load local GGUF model (may be None in demo mode)
 try:
@@ -105,35 +123,56 @@ try:
 except Exception:
     _llm = None
 
+# --------------------------------------------------------------------------- #
+# System prompt — with citation enforcement & research guidance
+# --------------------------------------------------------------------------- #
 SYSTEM_PROMPT = f"""You are II, a coding assistant connected to an optional local model.
-The repository index is approximate and may omit symbols:
+You have web-search and research tools. When answering questions that require
+current or external information, you MUST use the research tools and cite sources.
+
+REPOSITORY INDEX (approximate, may omit symbols):
 {repository_index}
 
-Approximate graph topology (navigation aid, not architecture proof):
+APPROXIMATE GRAPH TOPOLOGY (navigation aid, not architecture proof):
 {architecture_map}
 
-Pipeline status: repository graph summaries are available before inference; the
-current backends do not expose portable hidden-state hooks, forkable KV caches,
-or constrained-decoding interfaces. Static Python preflight is not a full
-three-gate correctness or safety proof.
+AVAILABLE TOOLS (call by name when helpful):
+- search_web(query): Search DuckDuckGo/Tavily/SearXNG for current information.
+  Returns results with citation IDs like [1], [2]. You MUST cite these.
+- read_url(url): Fetch and extract clean text from a URL.
+- research(query): Run a full research pipeline (search + fetch + evidence
+  extraction + conflict detection). Returns sources, passages, and conflicts.
+- execute_code(code): Run Python as a local subprocess; not isolated.
+- smt_solver(problem): Solve explicit constraints with Z3 when installed.
+  Format: VARIABLES: x Int, y Int / CONSTRAINTS: x > 0, y > 0, x + y == 10
+- program_synthesis(examples): Search a bounded expression set. Format:
+  JSON array of [[inputs], output], e.g. [[[1, 2], 3], [[5, 7], 12]]
+- blackboard(action, payload): Experimental interface store.
 
-Available helpers:
-- search_web(query): sends a query to an external web-search service
-- read_url(url): returns source URLs and exact extracted passages for review; extraction is not fact-checking
-- execute_code(code): runs a Python subprocess with the current user's permissions; it is not isolated
-- smt_solver(problem): solves explicit constraints when Z3 is installed. Format:
-    VARIABLES: x Int, y Int
-    CONSTRAINTS: x > 0, y > 0, x + y == 10
-- program_synthesis(examples): searches a bounded expression set. Format:
-    JSON array of [[inputs], output], e.g. [[[1, 2], 3], [[5, 7], 12]]
-- blackboard(action, payload): supports listing, inspection, and an approximate repository graph
+CITATION RULES (MANDATORY for web-derived answers):
+  1. Every factual claim from the web MUST carry a citation [1], [2], etc.
+  2. Citation IDs come from the search results provided in tool output.
+  3. Do not invent citation IDs that were not returned by tools.
+  4. If sources conflict, state the conflict and cite both sides.
+  5. If no source supports a claim, say "insufficient evidence".
+  6. Before finalizing, re-read your answer and verify every [n] maps to a
+     real source returned by the search tool.
 
-Guidance:
+PIPELINE STATUS:
+- Repository graph summaries are available before inference.
+- Web search returns citation-tagged results; verification is the model's job.
+- No hidden-state hooks, forkable KV caches, or constrained-decoding interfaces.
+- Static Python preflight is not a full correctness or safety proof.
+
+GUIDANCE:
 1. Verify important claims; tools do not guarantee correctness.
-2. Treat retrieval passages as unverified excerpts; lexical conflict flags are only review prompts. Say “insufficient evidence” when sources do not support a response.
+2. Treat retrieval passages as unverified excerpts. Lexical conflict flags are
+   review prompts only. Say "insufficient evidence" when sources do not
+   support a response.
 3. Use the solver only for explicitly encoded constraints.
 4. Treat code execution as potentially unsafe.
 5. Keep answers concise and useful; ask clarifying questions when needed.
+6. ALWAYS cite web sources. Uncited web claims will be rejected.
 """
 
 TOOLS = [
@@ -141,7 +180,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search the web for current information; sends a request to an external service.",
+            "description": "Search the web (Tavily > SearXNG > DuckDuckGo). Returns citation-tagged results.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
@@ -153,11 +192,23 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "read_url",
-            "description": "Fetch a URL and extract readable text",
+            "description": "Fetch a URL and extract readable text with evidence passages.",
             "parameters": {
                 "type": "object",
                 "properties": {"url": {"type": "string"}},
                 "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "research",
+            "description": "Run a full research pipeline: search + fetch + extract evidence + detect conflicts. Returns sources, passages, and conflicts with citation IDs.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
             },
         },
     },
@@ -177,7 +228,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "smt_solver",
-            "description": "Solve explicit logical constraints with Z3 when installed; does not parse arbitrary natural language.",
+            "description": "Solve explicit logical constraints with Z3 when installed. Format: VARIABLES: x Int, y Int / CONSTRAINTS: x > 0, y > 0, x + y == 10",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -217,7 +268,7 @@ TOOLS = [
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "inspect, list, or approximate graph",
+                        "description": "inspect, list, or graph",
                         "enum": ["inspect", "list", "graph"],
                     },
                     "payload": {
@@ -232,6 +283,9 @@ TOOLS = [
 ]
 
 
+# --------------------------------------------------------------------------- #
+# Code execution
+# --------------------------------------------------------------------------- #
 def execute_code(code: str, timeout: int = 15) -> tuple[bool, str]:
     """Run Python in a temporary subprocess (not an OS-level sandbox)."""
     with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
@@ -260,6 +314,33 @@ def execute_code(code: str, timeout: int = 15) -> tuple[bool, str]:
         return False, str(exc)
 
 
+# --------------------------------------------------------------------------- #
+# Citation verification helper
+# --------------------------------------------------------------------------- #
+def _extract_citations(text: str) -> list[str]:
+    """Find all [n] citation markers in text."""
+    return re.findall(r"\[(\d+)\]", text)
+
+
+def _verify_citations(text: str, available_citations: dict[str, dict]) -> dict:
+    """
+    Check that every [n] in text maps to a real citation ID.
+    Returns {"ok": bool, "missing": [ids], "unused": [ids]}.
+    """
+    used = set(_extract_citations(text))
+    available = set(available_citations.keys())
+    missing = sorted(used - available, key=lambda x: int(x.strip("[]")))
+    unused = sorted(available - used, key=lambda x: int(x.strip("[]")))
+    return {
+        "ok": len(missing) == 0,
+        "missing": missing,
+        "unused": unused,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Tool dispatch
+# --------------------------------------------------------------------------- #
 def execute_tool(
     tool_name: str,
     args: dict,
@@ -269,11 +350,15 @@ def execute_tool(
     if tool_name == "search_web":
         return search_web(args.get("query", ""))
     if tool_name == "read_url":
-        evidence = fetch_evidence(args.get("url", ""))
+        evidence = fetch_url_metadata(args.get("url", ""))
         if evidence_cache is not None:
-            evidence_cache.extend(evidence.get("evidence_passages", []))
-            evidence["possible_conflicts"] = candidate_contradictions(evidence_cache)
-        return json.dumps(evidence, ensure_ascii=False)
+            evidence_cache.extend(evidence.evidence_passages)
+        return json.dumps(evidence.__dict__, ensure_ascii=False, default=str)
+    if tool_name == "research":
+        result = research_and_answer(args.get("query", ""))
+        if evidence_cache is not None:
+            evidence_cache.extend(result.get("passages", []))
+        return json.dumps(result, ensure_ascii=False, default=str)
     if tool_name == "execute_code":
         success, output = execute_code(args.get("code", ""))
         return f"SUCCESS:\n{output}" if success else f"ERROR:\n{output}"
@@ -290,9 +375,30 @@ def execute_tool(
     return "Tool not found."
 
 
+# --------------------------------------------------------------------------- #
+# Self-verification wrapper: cite-check before finalizing
+# --------------------------------------------------------------------------- #
+def verify_answer_citations(answer_text: str,
+                            sources: dict[str, dict]) -> dict:
+    """
+    Check that every citation in answer_text maps to a real source.
+    Returns {"verified": bool, "missing": [...], "unused": [...], "answer": str}.
+    """
+    check = _verify_citations(answer_text, sources)
+    return {
+        "verified": check["ok"],
+        "missing_citations": check["missing"],
+        "unused_sources": check["unused"],
+        "answer": answer_text,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Research loop with self-verification
+# --------------------------------------------------------------------------- #
 def run_agent_v12(user_prompt: str):
-    """Run a bounded tool-use loop with optional keyword hints."""
-    print("[INFO] II local-agent prototype")
+    """Run a bounded tool-use loop with citation enforcement & self-verification."""
+    print("[INFO] II v12 — Internet-as-Brain agent")
     if _llm is None or getattr(_llm, "mode", "demo") == "demo":
         print("[WARN] No language-model backend is connected; demo mode cannot answer prompts.")
         print("    Recommended: load a compatible model in LM Studio and start its local server.")
@@ -302,7 +408,7 @@ def run_agent_v12(user_prompt: str):
     messages = [{"role": "user", "content": user_prompt}]
     evidence_cache: list[dict[str, str]] = []
 
-    # Optional keyword heuristic. The model may ignore this suggestion.
+    # Optional keyword heuristic
     hinted_tool = keyword_tool_hint(
         user_prompt, [t["function"]["name"] for t in TOOLS]
     )
@@ -313,7 +419,9 @@ def run_agent_v12(user_prompt: str):
             "use it only if appropriate.\n"
         )
 
-    for step in range(10):  # Max 10 ReAct steps to prevent infinite loops
+    research_results: dict | None = None
+
+    for step in range(10):  # Max 10 ReAct steps
         print(f"\n--- Step {step + 1} ---")
 
         response = _llm.chat(
@@ -329,19 +437,32 @@ def run_agent_v12(user_prompt: str):
         tool_calls = response.get("tool_calls") or []
 
         print(f"[MODEL] {content[:200]}...")
-        # Preserve tool_calls in the assistant message for OpenAI-compatible APIs.
         messages.append(response)
 
         if not tool_calls:
-            print("\n[DONE] Final Answer Reached.")
+            # Self-verification: check citations before finalizing
+            print("\n[VERIFY] Checking citations against sources...")
+            verify_result = verify_answer_citations(
+                content, research_results.get("sources", {}) if research_results else {}
+            )
+            if not verify_result["verified"]:
+                print(f"[VERIFY] MISSING citations: {verify_result['missing_citations']}")
+                print("[VERIFY] Asking model to fix citations...")
+                fix_prompt = (
+                    f"Your answer has missing or invalid citations: {verify_result['missing_citations']}.\n"
+                    f"Available sources: {json.dumps(verify_result['unused_sources'] or {}, ensure_ascii=False)}\n"
+                    f"Please rewrite your answer with correct citations [1], [2], etc. "
+                    f"Only cite sources that were returned by the search tool.\n"
+                    f"Original answer:\n{content}"
+                )
+                messages.append({"role": "user", "content": fix_prompt})
+                continue  # retry with fix prompt
+
+            print("\n[DONE] Final Answer Reached (citations verified).")
             print(content)
-            if "```python" in content:
-                code = content.split("```python", 1)[1].split("```", 1)[0]
-                report = VerificationCascade().verify_python(code)
-                print("[STATIC PREFLIGHT ONLY]")
-                print(json.dumps(report.to_dict(), indent=2))
             break
 
+        # Handle tool calls
         for tool_call in tool_calls:
             fn = tool_call["function"]["name"]
             args = tool_call["function"]["arguments"]
@@ -350,6 +471,13 @@ def run_agent_v12(user_prompt: str):
             print(f"[TOOL] Executing: {fn}")
             result = execute_tool(fn, args, evidence_cache=evidence_cache)
             print(f"[RESULT] {result[:300]}...")
+
+            # Cache research results for citation verification later
+            if fn == "research":
+                try:
+                    research_results = json.loads(result)
+                except json.JSONDecodeError:
+                    pass
 
             messages.append(
                 {
