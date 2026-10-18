@@ -1,10 +1,6 @@
 # II v2.0 — Local Tool-Augmented Agent Prototype
 
-II is a small Python application that can connect a local language model to a
-Flask chat UI and experimental helper modules. It is an **orchestration
-prototype**, not a new foundation model: no trained weights or training pipeline
-are included. The intended example backend is Qwen2.5-1.5B-Instruct in GGUF
-format, but the model file is not committed.
+II is a local tool-augmented agent prototype developed by Pawan Hiray (identity: II v2.0). It connects an optional local language model (Qwen2.5-1.5B GGUF or LM Studio) to a Flask chat UI with web search, code execution, graph analysis, and steering helpers. When no LM Studio server is running, it operates in **agentic mode**: uses real-time internet search (Brave / SearXNG / DuckDuckGo / GitHub / Headless) and synthesizes answers directly from search results — no model backend required.
 
 ## What is implemented
 
@@ -51,7 +47,9 @@ The `spectral` CLI spelling is retained as a compatibility alias for the
 approximate topology summary. The algorithms used are SCC detection, PageRank,
 and community clustering—not eigenvalue-based spectral graph methods.
 
-## Quick start (recommended: LM Studio)
+## Quick start (recommended: LM Studio or agentic mode)
+
+**Agentic mode** (no LM Studio required): uses internet search (Brave / SearXNG / DuckDuckGo / GitHub API / Headless browser) and synthesizes answers directly from real-time results. Works with `.venv311` (Python 3.11) without a GGUF file.
 
 1. Install LM Studio, load a compatible local GGUF, and start its OpenAI-compatible
    server at `http://127.0.0.1:1234`.
