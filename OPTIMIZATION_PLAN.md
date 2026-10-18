@@ -40,7 +40,7 @@ Both Astra and Fable are orchestration agents with multi-model, sandbox, benchma
 6. **UI renderer**: approve/promote 1 of 10 Jinja component candidates with build/review gates.
 7. **Private/air-gapped mode**: disable all external tools via config; use only local GGUF + blackboard + code execution.
 8. **Memory measurement**: measure peak RAM/VRAM with `qwen2.5-1.5b-instruct-q4_0.gguf` loaded directly.
-9. **No false claims**: publish `docs/LIMITATIONS.md`: prototype only, no MMLU/HumanEval result, no 98.5% claim, no universal superiority.
+9. **No false claims**: prototype only, no MMLU/HumanEval result, no universal superiority claim.
 
 ## Next actions (priority order)
 - [x] Smart search + refusal bypass + shorter prompt

@@ -136,3 +136,4 @@ Web search and URL fetch contact external services and sites. Local inference ca
 stay on-device when configured locally and when web tools are not used, but the
 whole system is not universally free, private, or air-gapped. The development
 server has no authentication and should remain on a trusted local machine.
+

@@ -79,3 +79,4 @@ modules remain the source of truth; `core/`, `tools/`, `server/`, `cli/`, and
 
 See [`LIMITATIONS.md`](LIMITATIONS.md) and [`VENDOR_CREDITS.md`](VENDOR_CREDITS.md)
 for scope, caveats, and licensing references.
+
