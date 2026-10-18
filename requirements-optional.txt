@@ -1,11 +1,18 @@
-# Optional model/runtime integrations. They are not required for the core app.
-# Installing these does not guarantee that the active backend exposes hidden
-# states, KV-cache forks, logits, or constrained-decoding hooks.
-llama-cpp-python>=0.2.0
-z3-solver>=4.12.0
+# II v2.0 -- optional integrations. NOT required for the core app and NOT
+# installed by requirements.txt.  Installing these does not guarantee the
+# active backend exposes hidden states, KV-cache forks, logits, or
+# constrained-decoding hooks (Stages 2-4 remain scaffolding).
+
+# Headless-browser search fallback (also needs: playwright install chromium)
+playwright>=1.40.0
+
+# Vision prototype (MobileCLIP-style grounding; endpoint still returns 501)
 torch>=2.0.0
 transformers>=4.30.0
 Pillow>=10.0.0
 
-# Optional type-checker used by the Blackboard inspector.
+# Embedding-based routing experiments
+sentence-transformers>=2.7.0
+
+# Optional type-checker used by the Blackboard inspector
 mypy>=1.5.0

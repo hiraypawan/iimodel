@@ -58,6 +58,11 @@ move or replace the existing public imports.
   checked-in task list is empty; the CLI does not run models or auto-score truth.
 - `ii_web.py` retains exact extracted passages and source URLs. Numeric/negation
   comparison is a lexical review signal, not contradiction proof or fact-checking.
+- `ii_security.py` provides the `II_PRIVATE` no-network switch (checked
+  dynamically), the SSRF guard for fetched URLs (`validate_public_url`), and
+  the shared `run_python_code` executor (resource-limited subprocess by
+  default -- not a sandbox; fail-closed Docker mode via
+  `II_CODE_SANDBOX=docker`). See `docs/SECURITY.md`.
 
 ## Four-stage pipeline status
 

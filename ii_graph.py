@@ -54,7 +54,7 @@ class CodebaseKnowledgeGraph:
     def __init__(self, root_dir: str, skip_dirs: Optional[list[str]] = None):
         self.root_dir = os.path.abspath(root_dir)
         self.skip_dirs = skip_dirs or [
-            "venv", ".venv", ".git", "__pycache__", "node_modules", ".env",
+            "venv", ".venv", ".venv311", "venv311", ".git", "__pycache__", "node_modules", ".env",
             "dist", "build", "coverage", ".pytest_cache",
         ]
         if nx is None:

@@ -20,6 +20,7 @@ import networkx as nx
 from graph.topology import GraphTopologyAnalyzer
 from ii_graph import CodebaseKnowledgeGraph
 from ingestion.license_checker import check_license
+from ii_security import is_private_mode, web_blocked_message
 
 GRAPH_CACHE_NAME = ".graph_cache"
 
@@ -130,6 +131,8 @@ class RepoIngestor:
 
     def ingest(self, github_url: str) -> str:
         """Clone, license-check, parse, and cache a supported GitHub repository."""
+        if is_private_mode():
+            raise PermissionError(web_blocked_message("repo ingestion"))
         owner, repo, canonical_url = self.parse_github_url(github_url)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         repo_dir = self.cache_dir / f"{owner}--{repo}"

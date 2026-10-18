@@ -1,7 +1,9 @@
--r requirements.txt
+# II v2.0 -- development tools only (not needed to run the app)
+-r requirements-core.txt
 
-pytest>=7.4.0
-hypothesis>=6.80.0
-ruff>=0.1.0
+pytest>=8.0.0
+hypothesis>=6.100.0
+ruff>=0.3.0
 bandit>=1.7.0
 mypy>=1.5.0
+numpy>=1.26.0

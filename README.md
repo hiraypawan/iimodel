@@ -2,6 +2,35 @@
 
 II is a local tool-augmented agent prototype developed by Pawan Hiray (identity: II v2.0). It connects an optional local language model (Qwen2.5-1.5B GGUF or LM Studio) to a Flask chat UI with web search, code execution, graph analysis, and steering helpers. When no LM Studio server is running, it operates in **agentic mode**: uses real-time internet search (Brave / SearXNG / DuckDuckGo / GitHub / Headless) and synthesizes answers directly from search results — no model backend required.
 
+## Status at a glance
+
+**Works now**
+
+- Agentic web-search synthesis (Brave / SearXNG / DuckDuckGo / GitHub /
+  Wikipedia) with citations -- usable with no model backend at all
+- Optional local chat via GGUF (`llama-cpp-python`) or LM Studio
+- Repository index + topology (SCC cycles, personalized PageRank, clusters)
+  injected into prompts; synthetic 30-file import-cycle fixture is tested
+- Blackboard interface contracts (locking, snapshots, inspector)
+- Gate-1 static verification; Z3 explicit-formula solving; bounded synthesis
+- License-gated GitHub ingestion (parses cloned code, never executes it)
+- `II_PRIVATE=1` no-network mode; SSRF guard on URL fetching; optional
+  Docker code-execution sandbox (see [docs/SECURITY.md](docs/SECURITY.md))
+
+**Scaffolding (code exists, cannot run with shipped backends)**
+
+- Activation steering / linear probes (no hidden-state hook), TIES/DARE
+  array math (never loads weights), entropy-MCTS (no logit adapter),
+  KV paging (metadata only; transfer raises `NotImplementedError`),
+  MobileCLIP vision (endpoint returns 501)
+
+**Not implemented / not claimed**
+
+- Any training or fine-tuning; any bundled model weights
+- Constrained decoding, verification Gates 2/3 without caller adapters
+- Benchmarks: the task dataset is empty, no model-quality scores exist
+- A sandbox in the default code-execution mode (see Security below)
+
 ## What is implemented
 
 | Component | Current scope and limitations |
@@ -18,7 +47,7 @@ II is a local tool-augmented agent prototype developed by Pawan Hiray (identity:
 | UI catalog | Ten original Flask/Jinja component **candidates** are included. None is approved; there is no renderer or generated-UI build pipeline. |
 | Evaluation | Produces human-review packets for supplied responses and supports raw-vs-II side-by-side packets. The task dataset is empty; the harness does not run models or auto-score factual correctness. |
 | Evidence | URL fetching retains source URLs and extracted passages. Numeric/negation conflict flags are rough review signals, not fact-checking. |
-| Code execution | Runs Python with the current user's permissions. It is **not sandboxed**; do not expose this app to untrusted users. |
+| Code execution | Default mode is a resource-limited subprocess running with the current user's permissions -- **not a sandbox**. `II_CODE_SANDBOX=docker` gives fail-closed Docker isolation; `II_REQUIRE_SANDBOX=1` refuses subprocess mode. Do not expose this app to untrusted users. See [docs/SECURITY.md](docs/SECURITY.md). |
 | Vision | Reliable UI-region localization is not implemented; the endpoint remains disabled. |
 
 No scalar capability rating, 2 GB RAM guarantee, error-rate estimate, or general
@@ -49,7 +78,7 @@ and community clustering—not eigenvalue-based spectral graph methods.
 
 ## Quick start (recommended: LM Studio or agentic mode)
 
-**Agentic mode** (no LM Studio required): uses internet search (Brave / SearXNG / DuckDuckGo / GitHub API / Headless browser) and synthesizes answers directly from real-time results. Works with `.venv311` (Python 3.11) without a GGUF file.
+**Agentic mode** (no LM Studio required): uses internet search (Brave / SearXNG / DuckDuckGo / GitHub API / Headless browser) and synthesizes answers directly from real-time results. Works with a Python 3.11 virtual environment (`.venv`) without a GGUF file.
 
 1. Install LM Studio, load a compatible local GGUF, and start its OpenAI-compatible
    server at `http://127.0.0.1:1234`.
@@ -76,10 +105,13 @@ and community clustering—not eigenvalue-based spectral graph methods.
 3. Open `http://127.0.0.1:5000/`; check `GET /api/status` for backend mode.
 
 The Windows launchers install the core requirements and start the app; they do
-not download model weights. Direct GGUF use requires the optional
-`llama-cpp-python` package and a separately downloaded model. Additional optional
-integrations are listed in `requirements-optional.txt`. Development tools are
-listed in `requirements-dev.txt`.
+not download model weights. `requirements.txt` installs only the lean core
+(`requirements-core.txt`, including `llama-cpp-python` for direct GGUF use with
+a separately downloaded model). Heavy optional integrations (torch,
+transformers, Playwright, sentence-transformers) are in
+`requirements-optional.txt`; development tools are in `requirements-dev.txt`.
+Virtual environments are never committed to git (`.venv`, `.venv311` are
+ignored).
 
 ## CLI and API
 
@@ -127,7 +159,7 @@ current test run.
 ## Limitations, sources, and safety
 
 Read [`docs/VENDOR_CREDITS.md`](docs/VENDOR_CREDITS.md) for license references.
-license references and clarifies that no third-party source code was copied into
+It clarifies that no third-party source code was copied into
 `vendor/`. The project code is licensed under MIT; see [`LICENSE`](LICENSE).
 Model weights remain subject to their own license and terms.
 
@@ -135,4 +167,19 @@ Web search and URL fetch contact external services and sites. Local inference ca
 stay on-device when configured locally and when web tools are not used, but the
 whole system is not universally free, private, or air-gapped. The development
 server has no authentication and should remain on a trusted local machine.
+
+**Security (read [docs/SECURITY.md](docs/SECURITY.md) before exposing anything):**
+
+- Set `II_PRIVATE=1` to disable all network tools (`search_web`, `read_url`,
+  `research`, `/api/search`, `/api/fetch`, `/api/research`, repo ingestion).
+  Local model chat, graph, blackboard, verification, SMT and synthesis keep
+  working; agentic (search-only) mode cannot answer while private mode is on.
+- `/api/fetch` and `read_url` pass an **SSRF guard**: only public http(s) URLs
+  are fetched; loopback/private/link-local/reserved targets, `localhost`, and
+  cloud-metadata addresses are refused. Redirect targets and DNS-rebinding
+  remain residual risks documented in `docs/SECURITY.md`.
+- `/api/repos/ingest` only accepts public `https://github.com/OWNER/REPO` URLs,
+  but it runs a local `git clone` subprocess and is blocked under `II_PRIVATE`.
+- `execute_code` is **not sandboxed by default**. Prefer
+  `II_CODE_SANDBOX=docker` (fail-closed) for any untrusted code.
 

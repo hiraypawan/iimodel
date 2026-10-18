@@ -27,6 +27,8 @@ from typing import Optional
 import trafilatura
 from duckduckgo_search import DDGS
 
+from ii_security import is_private_mode, validate_public_url, web_blocked_message
+
 try:
     import requests  # type: ignore
 except ImportError:
@@ -131,6 +133,84 @@ def _extract_text_evidence(text: str, source_url: str, max_passages: int = 5,
         if len(passages) >= max_passages:
             break
     return passages
+
+
+def extract_evidence_passages(text: str, source_url: str, max_passages: int = 5,
+                              max_chars: int = 600) -> list[dict[str, str]]:
+    """Public alias for passage extraction (exact quotes + source URL)."""
+    return _extract_text_evidence(text, source_url, max_passages, max_chars)
+
+
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+_NEGATION_RE = re.compile(r"\b(not|no|never|none|cannot|can't|isn't|aren't|wasn't|weren't)\b", re.I)
+_STOPWORDS = {
+    "the", "and", "for", "that", "this", "with", "from", "have", "has",
+    "are", "was", "were", "will", "would", "can", "could",
+}
+
+
+def _content_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]{3,}", text.lower()) if w not in _STOPWORDS}
+
+
+def candidate_contradictions(passages: list[dict[str, str]]) -> list[dict]:
+    """Heuristic numeric/negation conflict signals across different sources.
+
+    These are rough signals for human review only -- they are not
+    fact-checking and never prove a contradiction.
+    """
+    signals: list[dict] = []
+    for i, left in enumerate(passages):
+        for right in passages[i + 1:]:
+            left_url, right_url = left.get("source_url", ""), right.get("source_url", "")
+            if not left_url or left_url == right_url:
+                continue
+            left_quote, right_quote = left.get("quote", ""), right.get("quote", "")
+            found: list[str] = []
+            left_numbers, right_numbers = set(_NUMBER_RE.findall(left_quote)), set(_NUMBER_RE.findall(right_quote))
+            if left_numbers and right_numbers and left_numbers != right_numbers:
+                found.append(f"numeric mismatch: {sorted(left_numbers)} vs {sorted(right_numbers)}")
+            if bool(_NEGATION_RE.search(left_quote)) != bool(_NEGATION_RE.search(right_quote)):
+                if _content_words(left_quote) & _content_words(right_quote):
+                    found.append("negation mismatch across sources discussing the same topic")
+            if found:
+                signals.append({
+                    "left_url": left_url,
+                    "right_url": right_url,
+                    "signals": found,
+                    "note": "Heuristic signal only; human review required before treating this as a contradiction.",
+                })
+    return signals
+
+
+def build_evidence_report(query: str, fetched_results: list[dict]) -> dict:
+    """Summarize retrieved passages for a query without assessing truth.
+
+    A passage "matches" when it shares a content word with the query.  The
+    report always states that factual correctness was not assessed and that
+    human review is required.
+    """
+    passages: list[dict[str, str]] = []
+    for item in fetched_results or []:
+        if isinstance(item, dict):
+            passages.extend(item.get("evidence_passages") or [])
+    query_words = _content_words(query or "")
+    matching = [p for p in passages if query_words & _content_words(p.get("quote", ""))]
+    return {
+        "query": query,
+        "status": "evidence_available" if matching else "insufficient_evidence",
+        "passages": passages,
+        "matching_passages": matching,
+        "conflicts": candidate_contradictions(passages),
+        "factual_correctness_assessed": False,
+        "human_review_required": True,
+        "verification_status": "unverified",
+    }
+
+
+def fetch_evidence(url: str, max_chars: int = 4000) -> FetchResult:
+    """Fetch a URL and return metadata + evidence passages (SSRF-guarded)."""
+    return fetch_url_metadata(url, max_chars=max_chars)
 
 
 # --------------------------------------------------------------------------- #
@@ -381,10 +461,14 @@ def search_web(query: str, max_results: int = 5,
     """
     Search the web using free backends (no API keys required).
 
-    Priority: DuckDuckGo -> SearXNG -> Wikipedia -> Crossref.
+    Priority (as implemented): Brave -> SearXNG -> DuckDuckGo ->
+    GitHub API -> Headless -> Wikipedia -> Crossref (academic only).
     Results are merged and de-duplicated by URL.
-    Returns JSON with citation-tagged results.
+    Returns text with citation-tagged results plus a RAW_JSON block.
+    Blocked entirely when II_PRIVATE is enabled.
     """
+    if is_private_mode():
+        return web_blocked_message("search_web")
     all_results: list[SearchResult] = []
     backends_used: list[str] = []
     seen_links: set[str] = set()
@@ -568,11 +652,29 @@ def search_web(query: str, max_results: int = 5,
 # Fetch + extract with evidence tracking
 # --------------------------------------------------------------------------- #
 def fetch_url_metadata(url: str, max_chars: int = 4000) -> FetchResult:
-    """Fetch/extract a URL and attach metadata + evidence passages."""
+    """Fetch/extract a URL and attach metadata + evidence passages.
+
+    The URL passes the SSRF guard (``validate_public_url``) before any
+    request; private/loopback/link-local targets are refused.
+    """
     import urllib.request
     from urllib.parse import urlparse
 
     fetched_at = datetime.now(timezone.utc).isoformat()
+    if is_private_mode():
+        return FetchResult(
+            url=url, title=None, text=web_blocked_message("read_url/fetch"),
+            last_modified=None, domain_score=0, fetched_at=fetched_at,
+            success=False, error=web_blocked_message("read_url/fetch"),
+        )
+    try:
+        url = validate_public_url(url)
+    except ValueError as exc:
+        return FetchResult(
+            url=url, title=None, text=f"Blocked URL: {exc}",
+            last_modified=None, domain_score=0, fetched_at=fetched_at,
+            success=False, error=f"Blocked URL: {exc}",
+        )
     domain = urlparse(url).netloc.lower()
     domain_score = _heuristic_domain_score(domain)
     last_modified: Optional[str] = None
@@ -603,7 +705,18 @@ def fetch_url_metadata(url: str, max_chars: int = 4000) -> FetchResult:
 
 
 def read_url(url: str, max_chars: int = 4000) -> str:
-    """Fetch a URL and extract clean text via Trafilatura."""
+    """Fetch a URL and extract clean text via Trafilatura.
+
+    Refuses non-public URLs (SSRF guard) and all fetches under II_PRIVATE.
+    Redirect targets are followed by the fetcher and are not re-validated;
+    see docs/SECURITY.md for the residual risk.
+    """
+    if is_private_mode():
+        return f"Extraction failed: {web_blocked_message('read_url')}"
+    try:
+        url = validate_public_url(url)
+    except ValueError as exc:
+        return f"Extraction failed: blocked URL: {exc}"
     try:
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
@@ -641,6 +754,13 @@ class ResearchEngine:
 
     def research(self, query: str) -> dict:
         """Run: search -> fetch -> extract evidence -> check contradictions."""
+        if is_private_mode():
+            return {
+                "query": query, "sources": {}, "passages": [], "conflicts": [],
+                "search_log": [{"round": 0, "action": "blocked_by_ii_private"}],
+                "total_sources": 0, "total_passages": 0,
+                "error": web_blocked_message("research"),
+            }
         all_sources: dict[str, dict] = {}
         all_passages: list[dict[str, str]] = []
         search_log: list[dict] = []

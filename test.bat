@@ -1,15 +1,11 @@
 @echo off
 cd /d "%~dp0"
-echo Test 1: Python version
-python --version
-echo Test 2: Check venv
-if exist ".venv\Scripts\python.exe" (
-    echo Venv exists
-    .venv\Scripts\python.exe --version
-) else (
-    echo Venv NOT found
+if not exist ".venv\Scripts\python.exe" (
+    echo ERROR: .venv not found. Run INSTALL_AND_RUN.bat first.
+    pause
+    exit /b 1
 )
-echo Test 3: Run app
-.venv\Scripts\python.exe -c "print('Hello from II v12')"
-echo All tests done.
+echo II v2.0 - test suite
+.venv\Scripts\python.exe --version
+.venv\Scripts\python.exe -m unittest discover -s tests -v
 pause

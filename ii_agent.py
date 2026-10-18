@@ -1,8 +1,8 @@
 """
-II v12 agent — with Internet-as-Brain research pipeline.
+II v2.0 agent — with Internet-as-Brain research pipeline.
 
 Adds:
-  - Multi-backend web search (Tavily > SearXNG > DuckDuckGo)
+  - Multi-backend web search (Brave > SearXNG > DuckDuckGo > GitHub)
   - Citation enforcement ([1], [2], etc.)
   - Multi-step research loop (search → fetch → verify → synthesize)
   - Self-verification before output (claims checked against cited sources)
@@ -43,6 +43,7 @@ from ii_blackboard import (
     blackboard_tool,
 )
 from llama_local import LocalModel
+from ii_security import is_private_mode, run_python_code, web_blocked_message
 
 # --------------------------------------------------------------------------- #
 # Lightweight keyword-based tool hint (heuristic only)
@@ -99,7 +100,7 @@ def keyword_tool_hint(user_prompt: str, available_tool_names: list) -> str | Non
 
 
 # --------------------------------------------------------------------------- #
-# Initialize v12 systems
+# Initialize II v2.0 systems
 # --------------------------------------------------------------------------- #
 _WORKDIR = "."
 kg = CodebaseKnowledgeGraph(_WORKDIR)
@@ -137,7 +138,7 @@ APPROXIMATE GRAPH TOPOLOGY (navigation aid, not architecture proof):
 {architecture_map}
 
 AVAILABLE TOOLS (call by name when helpful):
-- search_web(query): Search DuckDuckGo/Tavily/SearXNG for current information.
+- search_web(query): Search Brave/SearXNG/DuckDuckGo/GitHub for current information.
   Returns results with citation IDs like [1], [2]. You MUST cite these.
 - read_url(url): Fetch and extract clean text from a URL.
 - research(query): Run a full research pipeline (search + fetch + evidence
@@ -180,7 +181,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search the web (Tavily > SearXNG > DuckDuckGo). Returns citation-tagged results.",
+            "description": "Search the web (Brave > SearXNG > DuckDuckGo > GitHub). Returns citation-tagged results.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
@@ -287,31 +288,12 @@ TOOLS = [
 # Code execution
 # --------------------------------------------------------------------------- #
 def execute_code(code: str, timeout: int = 15) -> tuple[bool, str]:
-    """Run Python in a temporary subprocess (not an OS-level sandbox)."""
-    with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
-        f.write(code)
-        temp_path = f.name
-    try:
-        result = subprocess.run(
-            [sys.executable, temp_path],
-            capture_output=True, text=True, timeout=timeout,
-        )
-        os.unlink(temp_path)
-        if result.returncode == 0:
-            return True, result.stdout
-        return False, result.stderr
-    except subprocess.TimeoutExpired:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        return False, "Execution timed out (possible infinite loop)."
-    except Exception as exc:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        return False, str(exc)
+    """Run Python via ii_security.run_python_code (see its docstring).
+
+    Default subprocess mode is NOT a sandbox; II_CODE_SANDBOX=docker gives
+    fail-closed Docker isolation.
+    """
+    return run_python_code(code, timeout=timeout)
 
 
 # --------------------------------------------------------------------------- #
@@ -347,6 +329,8 @@ def execute_tool(
     evidence_cache: list[dict[str, str]] | None = None,
 ) -> str:
     """Dispatch a selected tool to its implementation."""
+    if tool_name in {"search_web", "read_url", "research"} and is_private_mode():
+        return web_blocked_message(tool_name)
     if tool_name == "search_web":
         return search_web(args.get("query", ""))
     if tool_name == "read_url":
@@ -396,9 +380,9 @@ def verify_answer_citations(answer_text: str,
 # --------------------------------------------------------------------------- #
 # Research loop with self-verification
 # --------------------------------------------------------------------------- #
-def run_agent_v12(user_prompt: str):
+def run_agent(user_prompt: str):
     """Run a bounded tool-use loop with citation enforcement & self-verification."""
-    print("[INFO] II v12 — Internet-as-Brain agent")
+    print("[INFO] II v2.0 -- local tool-augmented agent")
     if _llm is None or getattr(_llm, "mode", "demo") == "demo":
         print("[WARN] No language-model backend is connected; demo mode cannot answer prompts.")
         print("    Recommended: load a compatible model in LM Studio and start its local server.")
@@ -489,9 +473,13 @@ def run_agent_v12(user_prompt: str):
             )
 
 
+# Backward-compatible alias (pre-v2.0 name).
+run_agent_v12 = run_agent
+
+
 def main() -> None:
-    prompt = input("Enter v12 Task: ")
-    run_agent_v12(prompt)
+    prompt = input("Enter II Task: ")
+    run_agent(prompt)
 
 
 if __name__ == "__main__":

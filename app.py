@@ -95,6 +95,22 @@ except ImportError:
     _VISION_AVAILABLE = False
 
 from ii_blackboard import Blackboard, blackboard_tool  # noqa: E402  # pure Python
+from ii_security import (  # noqa: E402
+    is_private_mode,
+    run_python_code,
+    sandbox_mode,
+    web_blocked_message,
+)
+
+WEB_TOOL_NAMES = {"search_web", "read_url", "research"}
+
+
+def _active_tools() -> list:
+    """Tools offered to the model; web tools are hidden under II_PRIVATE."""
+    if not is_private_mode():
+        return TOOLS
+    return [t for t in TOOLS if t["function"]["name"] not in WEB_TOOL_NAMES]
+
 
 # --------------------------------------------------------------------------- #
 # Flask app
@@ -131,7 +147,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search the web (Tavily > SearXNG > DuckDuckGo). Returns citation-tagged results.",
+            "description": "Search the web (Brave > SearXNG > DuckDuckGo > GitHub > Wikipedia). Returns citation-tagged results.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
@@ -261,7 +277,7 @@ TOOLS.append(
 SYSTEM_PROMPT_TEMPLATE = """You are II (Identity: II v2.0), developed by Pawan Hiray. Never claim to be Anthropic, OpenAI, or any other company.
 Always assist normal questions (time, repos, verification). Never refuse with "I'm sorry, I cannot assist". Only decline illegal/harmful requests.
 If asked "who made you?" say: "Pawan Hiray developed me; I am II."
-Always use search_web for time/current events/repo/news. Cite results as [1], [2]. Never guess times.
+{web_instruction}
 Tools: search_web(query), read_url(url), research(query), execute_code(code), smt_solver(problem), program_synthesis(examples), blackboard(action,payload).
 {repository_index}
 {decision_context}
@@ -272,36 +288,18 @@ Tools: search_web(query), read_url(url), research(query), execute_code(code), sm
 # Tool implementations
 # --------------------------------------------------------------------------- #
 def execute_code(code: str, timeout: int = 20) -> tuple[bool, str]:
-    """Run Python in a temporary subprocess (not an OS-level sandbox)."""
-    with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
-        f.write(code)
-        temp_path = f.name
-    try:
-        result = subprocess.run(
-            [sys.executable, temp_path],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        os.unlink(temp_path)
-        if result.returncode == 0:
-            return True, result.stdout
-        return False, result.stderr
-    except subprocess.TimeoutExpired:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        return False, "Execution timed out (possible infinite loop)."
-    except Exception as exc:
-        try:
-            os.unlink(temp_path)
-        except OSError:
-            pass
-        return False, str(exc)
+    """Run Python via ii_security.run_python_code.
+
+    Default mode is a resource-limited subprocess running as the current
+    user -- NOT a sandbox.  Set II_CODE_SANDBOX=docker for fail-closed
+    Docker isolation; set II_REQUIRE_SANDBOX=1 to refuse subprocess mode.
+    """
+    return run_python_code(code, timeout=timeout)
 
 
 def dispatch_tool(name: str, args: dict) -> str:
+    if name in WEB_TOOL_NAMES and is_private_mode():
+        return web_blocked_message(name)
     if name == "search_web":
         return search_web(_smart_search_query(args["query"]))
     if name == "read_url":
@@ -346,7 +344,14 @@ def build_system_prompt() -> str:
     smt_line = "- smt_solver(problem): Solve explicit constraints with Z3" if _SMT_AVAILABLE else ""
     synth_line = "- program_synthesis(examples): Search a bounded expression set for a match" if _SYNTH_AVAILABLE else ""
     vision_line = "- visual_ground(image_path, query): Experimental vision prototype" if _VISION_AVAILABLE else ""
+    web_instruction = (
+        "II_PRIVATE mode is ON: web tools are disabled. Do not claim to have "
+        "searched the web; say when information may be out of date."
+        if is_private_mode() else
+        "Always use search_web for time/current events/repo/news. Cite results as [1], [2]. Never guess times."
+    )
     return SYSTEM_PROMPT_TEMPLATE.format(
+        web_instruction=web_instruction,
         repository_index=repository_index,
         decision_context=dc,
         constraint_context=cc,
@@ -479,6 +484,9 @@ def api_status():
             "synthesis": _SYNTH_AVAILABLE,
             "vision_prototype": _VISION_AVAILABLE,
         },
+        "private_mode": is_private_mode(),
+        "web_tools_enabled": not is_private_mode(),
+        "code_sandbox": sandbox_mode(),
     })
 
 
@@ -491,6 +499,19 @@ def api_chat():
 
     # Agentic mode: if LM Studio is unavailable, use pure internet + search synthesis
     agentic_mode = (MODEL is None or MODEL.mode == "demo")
+
+    if agentic_mode and is_private_mode():
+        return jsonify({
+            "response": (
+                "II_PRIVATE mode is enabled and no local model backend is "
+                "available, so this request cannot be answered: agentic mode "
+                "needs web search, which private mode disables. Start a local "
+                "GGUF/LM Studio backend or unset II_PRIVATE."
+            ),
+            "agentic": False,
+            "demo": True,
+            "private_mode": True,
+        })
 
     if agentic_mode and not user_message.startswith("search_"):
         # Pure agentic: search, synthesize, return — no LM Studio needed
@@ -531,9 +552,9 @@ def api_chat():
     research_sources: dict[str, dict] = {}
     citation_verification: dict | None = None
 
-    # Always pull latest internet data before responding (real-time data)
+    # Pull latest internet data before responding (skipped under II_PRIVATE)
     try:
-        live_search = search_web(_smart_search_query(user_message)[:100])
+        live_search = "" if is_private_mode() else search_web(_smart_search_query(user_message)[:100])
         messages.append({"role": "system", "content": f"Latest internet results for '{user_message}':\n{live_search[:2000]}"})
     except Exception:
         pass
@@ -544,7 +565,7 @@ def api_chat():
     for iteration in range(4):
         resp = MODEL.chat(
             messages=messages[-6:] if len(messages) > 6 else messages,
-            tools=TOOLS,
+            tools=_active_tools(),
             temperature=0.2,
             max_tokens=1024,
         )
@@ -640,7 +661,7 @@ def api_chat():
         # If model gave no meaningful answer and we haven't forced search yet,
         # and the question needs web info, force search_web
         if not final_text or len(final_text.strip()) < 5:
-            if not forced_search and _needs_web_search(user_message):
+            if not forced_search and _needs_web_search(user_message) and not is_private_mode():
                 print(f"[FORCE-SEARCH] Model returned empty, forcing search: {user_message[:50]}...")
                 obs = search_web(_smart_search_query(user_message))
                 forced_search = True
@@ -658,7 +679,7 @@ def api_chat():
 
         # Model gave non-empty answer - check if it needs citations or verification
         # Force search_web for any real-time/current/verify/time question that wasn't searched
-        if not tool_calls and _needs_web_search(user_message) and not forced_search:
+        if not tool_calls and _needs_web_search(user_message) and not forced_search and not is_private_mode():
             # If no sources yet, force search first
             if not research_sources:
                 print(f"[FORCE-SEARCH] Forcing search for: {user_message[:60]}...")
@@ -717,9 +738,11 @@ def api_chat():
 
     # AGENTIC MODE (pure internet + synthesis, no LM Studio dependency)
     # If LM Studio is unavailable or refused, synthesize directly from search results
-    if MODEL is None or MODEL.mode == "demo" or any(p in (final_text or "").lower() for p in refusal_patterns):
-        # Use search results to build direct answer
-        if not forced_search:
+    if (MODEL is None or MODEL.mode == "demo" or any(p in (final_text or "").lower() for p in refusal_patterns)):
+        # Use search results to build direct answer (never under II_PRIVATE)
+        if is_private_mode():
+            pass
+        elif not forced_search:
             try:
                 search_obs = search_web(_smart_search_query(user_message))
                 forced_search = True
@@ -821,6 +844,11 @@ def api_chat():
                 f"Based on available sources:\n" +
                 "\n".join(f"  {line}" for line in source_lines) +
                 f"\n\nNote: The model refused to synthesize; displaying search results directly."
+            )
+        elif is_private_mode():
+            final_text = (
+                "The model refused to respond and II_PRIVATE mode disables "
+                "the search-based fallback."
             )
         else:
             # Try a direct search now and build from that
@@ -989,14 +1017,20 @@ def api_verify():
 @app.route("/api/search", methods=["POST"])
 def api_search():
 
+    if is_private_mode():
+        return jsonify({"error": web_blocked_message("search"), "private_mode": True}), 403
     data = request.get_json(force=True) or {}
     query = data.get("query", "")
+    if not query.strip():
+        return jsonify({"error": "empty query"}), 400
     return jsonify({"results": search_web(_smart_search_query(query))})
 
 
 @app.route("/api/research", methods=["POST"])
 def api_research():
     """Run the full research pipeline: search + fetch + extract + detect conflicts."""
+    if is_private_mode():
+        return jsonify({"error": web_blocked_message("research"), "private_mode": True}), 403
     data = request.get_json(force=True) or {}
     query = data.get("query", "")
     if not query:
@@ -1019,9 +1053,15 @@ def api_verify_citations():
 
 @app.route("/api/fetch", methods=["POST"])
 def api_fetch():
+    if is_private_mode():
+        return jsonify({"error": web_blocked_message("fetch"), "private_mode": True}), 403
     data = request.get_json(force=True) or {}
     url = data.get("url", "")
+    if not isinstance(url, str) or not url.strip():
+        return jsonify({"error": "url must be a non-empty string"}), 400
     result = fetch_url_metadata(url)
+    if not result.success and (result.error or "").startswith("Blocked URL"):
+        return jsonify({"error": result.error, "success": False}), 400
     return jsonify(
         {
             "tag": format_source_tag(result),
@@ -1115,6 +1155,8 @@ def api_steer():
 @app.route("/api/repos/ingest", methods=["POST"])
 def api_repo_ingest():
     """Shallow-clone and index an explicitly supplied public GitHub URL."""
+    if is_private_mode():
+        return jsonify({"error": web_blocked_message("repo ingestion"), "ingested": False, "private_mode": True}), 403
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "expected a JSON object with a url field"}), 400
@@ -1131,6 +1173,8 @@ def api_repo_ingest():
     )
     try:
         result = ingestor.ingest(repo_url)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc), "ingested": False, "private_mode": True}), 403
     except FileExistsError as exc:
         return jsonify({"error": str(exc), "ingested": False}), 409
     except ValueError as exc:
@@ -1189,6 +1233,8 @@ def init_backend():
     print(f"Z3 SMT solver   : {'available' if _SMT_AVAILABLE else 'NOT available'}")
     print(f"Program synth   : {'available' if _SYNTH_AVAILABLE else 'NOT available'}")
     print(f"MobileCLIP vision: {'available' if _VISION_AVAILABLE else 'NOT available'}")
+    print(f"II_PRIVATE (no-network mode): {'ON' if is_private_mode() else 'off'}")
+    print(f"Code execution mode: {sandbox_mode()} (default subprocess is NOT a sandbox)")
     print()
 
     if not MODEL_PATH.is_file():
