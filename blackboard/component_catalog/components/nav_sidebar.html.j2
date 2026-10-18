@@ -1,0 +1,7 @@
+<nav class="ii-sidebar" aria-label="{{ label|default('Primary navigation')|e }}">
+  <ul>
+  {% for item in links %}
+    <li><a href="{{ item.href|e }}"{% if item.current|default(false) %} aria-current="page"{% endif %}>{{ item.label|e }}</a></li>
+  {% endfor %}
+  </ul>
+</nav>

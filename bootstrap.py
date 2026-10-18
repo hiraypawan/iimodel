@@ -1,87 +1,54 @@
-"""
-bootstrap.py — II v11 Auto-Bootstrapper
+"""Cross-platform bootstrapper for the II prototype.
 
-Runs before app.py to ensure every dependency is installed,
-including llama-cpp-python with a pre-built wheel (no build tools needed).
-
-Usage:
-    python bootstrap.py
+Creates a local virtual environment, installs the declared dependencies, and
+starts the Flask app. Model weights and llama-cpp-python are not downloaded or
+installed automatically; LM Studio is the recommended model backend.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
-import os
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REQUIREMENTS = HERE / "requirements.txt"
+VENV = HERE / ".venv"
 
 
-def run(cmd: list[str], check: bool = False) -> subprocess.CompletedProcess:
+def run(cmd: list[str]) -> None:
     print(f"[RUN] {' '.join(cmd)}")
-    return subprocess.run(cmd, check=check)
+    subprocess.run(cmd, check=True)
 
 
 def ensure_python() -> None:
     if sys.version_info < (3, 11):
-        print("[ERROR] Python 3.11+ is required.")
-        sys.exit(1)
+        raise SystemExit("[ERROR] Python 3.11 or newer is required.")
 
 
-def ensure_venv() -> None:
-    venv = HERE / "venv"
-    if not venv.exists():
-        print("[INSTALL] Creating virtual environment...")
-        run([sys.executable, "-m", "venv", str(venv)], check=True)
-
-
-def get_venv_python() -> Path:
+def venv_python() -> Path:
     if os.name == "nt":
-        return HERE / "venv" / "Scripts" / "python.exe"
-    return HERE / "venv" / "bin" / "python"
-
-
-def install_deps(python_exe: Path) -> None:
-    print("[INSTALL] Upgrading pip...")
-    run([str(python_exe), "-m", "pip", "install", "--upgrade", "pip"], check=False)
-
-    if REQUIREMENTS.exists():
-        print(f"[INSTALL] Installing from {REQUIREMENTS.name}...")
-        run([str(python_exe), "-m", "pip", "install", "-r", str(REQUIREMENTS)], check=False)
-
-    # CRITICAL: llama-cpp-python with pre-built wheel — no Visual Studio needed
-    print("[INSTALL] Installing llama-cpp-python (pre-built wheel)...")
-    run(
-        [
-            str(python_exe),
-            "-m",
-            "pip",
-            "install",
-            "llama-cpp-python",
-            "--only-binary=:all:",
-        ],
-        check=True,
-    )
-
-    # Playwright browser for UI heuristics
-    print("[INSTALL] Installing Playwright Chromium...")
-    run([str(python_exe), "-m", "playwright", "install", "chromium"], check=False)
-
-
-def launch_app(python_exe: Path) -> None:
-    print("[LAUNCH] Starting II v11 server at http://127.0.0.1:5000/")
-    os.chdir(HERE)
-    run([str(python_exe), "app.py"], check=True)
+        return VENV / "Scripts" / "python.exe"
+    return VENV / "bin" / "python"
 
 
 def main() -> None:
     ensure_python()
-    ensure_venv()
-    python_exe = get_venv_python()
-    install_deps(python_exe)
-    launch_app(python_exe)
+    if not VENV.exists():
+        print("[SETUP] Creating virtual environment...")
+        run([sys.executable, "-m", "venv", str(VENV)])
+
+    python_exe = venv_python()
+    run([str(python_exe), "-m", "pip", "install", "--upgrade", "pip"])
+    run([str(python_exe), "-m", "pip", "install", "-r", str(REQUIREMENTS)])
+
+    print("[INFO] Model weights are not bundled.")
+    print("[INFO] For model chat, start LM Studio with a model loaded at http://127.0.0.1:1234.")
+    print("[INFO] Otherwise the app will start in demo mode and show setup instructions.")
+    print("[LAUNCH] Starting II at http://127.0.0.1:5000/")
+    os.chdir(HERE)
+    run([str(python_exe), "app.py"])
 
 
 if __name__ == "__main__":

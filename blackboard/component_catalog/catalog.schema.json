@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "II Component Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "components"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "components": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/component" }
+    }
+  },
+  "$defs": {
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "kind", "name", "summary", "tags", "status", "target",
+        "source", "license", "dependencies", "entrypoint", "export_name",
+        "props_schema", "slots", "validation"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+          "maxLength": 120
+        },
+        "kind": { "enum": ["component", "template"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "uniqueItems": true
+        },
+        "status": { "enum": ["candidate", "approved", "deprecated"] },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["framework", "language", "styling"],
+          "properties": {
+            "framework": { "type": "string", "minLength": 1 },
+            "language": { "enum": ["tsx", "jsx", "html", "jinja"] },
+            "styling": { "type": "string", "minLength": 1 },
+            "framework_range": { "type": ["string", "null"] },
+            "styling_range": { "type": ["string", "null"] }
+          }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["url", "revision", "path", "content_sha256"],
+          "properties": {
+            "url": { "type": "string", "format": "uri" },
+            "revision": { "type": "string", "minLength": 1 },
+            "path": { "type": "string", "minLength": 1 },
+            "content_sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" }
+          }
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["spdx_id", "license_url", "review_status", "notice_required"],
+          "properties": {
+            "spdx_id": { "type": "string", "minLength": 1 },
+            "license_url": { "type": "string", "format": "uri" },
+            "review_status": { "enum": ["pending", "verified", "rejected"] },
+            "reviewed_by": { "type": ["string", "null"] },
+            "reviewed_at": { "type": ["string", "null"], "format": "date-time" },
+            "notice_required": { "type": ["boolean", "null"] }
+          }
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["package", "version_range", "kind"],
+            "properties": {
+              "package": { "type": "string", "minLength": 1 },
+              "version_range": { "type": "string", "minLength": 1 },
+              "kind": { "enum": ["runtime", "peer", "development"] }
+            }
+          }
+        },
+        "entrypoint": { "type": "string", "minLength": 1 },
+        "export_name": { "type": "string", "minLength": 1 },
+        "props_schema": { "type": "object" },
+        "slots": { "type": "object" },
+        "validation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["build", "unit_tests", "accessibility", "visual_review"],
+          "properties": {
+            "build": { "enum": ["not_run", "pass", "fail"] },
+            "unit_tests": { "enum": ["not_run", "pass", "fail"] },
+            "accessibility": { "enum": ["not_run", "pass", "fail"] },
+            "visual_review": { "enum": ["not_reviewed", "accepted", "rejected"] },
+            "notes": { "type": "string" }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "approved" } } },
+          "then": {
+            "properties": {
+              "license": {
+                "required": ["reviewed_by", "reviewed_at", "notice_required"],
+                "properties": {
+                  "review_status": { "const": "verified" },
+                  "reviewed_by": { "type": "string", "minLength": 1 },
+                  "reviewed_at": { "type": "string", "format": "date-time" },
+                  "notice_required": { "type": "boolean" }
+                }
+              },
+              "validation": {
+                "properties": {
+                  "build": { "const": "pass" },
+                  "unit_tests": { "const": "pass" },
+                  "accessibility": { "const": "pass" },
+                  "visual_review": { "const": "accepted" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

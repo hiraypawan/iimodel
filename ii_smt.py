@@ -1,18 +1,17 @@
 """
-Part 11 / v11 — FIX 1: Neuro-Symbolic SMT Solving (Z3/CVC5 Integration)
+Optional Z3-backed solver for formally specified constraints.
 
-Replaces neural probabilistic math with deterministic SMT solving.
-The 1.5B model breaks PhD-level problems into logical constraints and variables;
-Z3 mathematically proves whether a solution exists and outputs exact variable
-assignments. Hallucination rate drops to 0% for verified math.
-
-Note: z3-solver must be installed separately: pip install z3-solver
+The solver checks the formula it is given; it does not translate natural-language
+questions into constraints or verify that a user/model encoded the original
+problem correctly. Install z3-solver separately to enable this module.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional
+
+from reasoning.constraint_compiler import ConstraintCompiler
 
 
 @dataclass
@@ -25,7 +24,9 @@ class SMTResult:
 
 class Z3Solver:
     """
-    Wrapper around z3-solver for deterministic mathematical verification.
+    Optional wrapper around Z3 for integer, real, and Boolean constraints.
+    It checks the supplied formula; it does not establish that the formula
+    correctly represents a natural-language problem.
 
     Usage:
         solver = Z3Solver()
@@ -41,7 +42,7 @@ class Z3Solver:
             import z3  # type: ignore
         except ImportError as exc:
             raise ImportError(
-                "z3-solver is required for PhD-level math verification. "
+                "z3-solver is required for formal constraint solving. "
                 "Install it: pip install z3-solver\n"
                 f"Original error: {exc}"
             )
@@ -56,7 +57,8 @@ class Z3Solver:
         Solve a set of logical constraints over integer/real variables.
 
         variables: [("x", "Int"), ("y", "Real"), ...]
-        constraints: ["x > 0", "x + y == 10", ...] (z3-python string expressions)
+        constraints: supported explicit formulas such as ["x > 0", "x + y == 10"];
+        expressions are validated and compiled from a restricted AST.
         """
         try:
             solver = self.z3.Solver()
@@ -64,6 +66,8 @@ class Z3Solver:
 
             # Declare variables
             for name, vtype in variables:
+                if name in z3_vars:
+                    raise ValueError(f"Duplicate variable declaration: {name!r}.")
                 if vtype == "Int":
                     z3_vars[name] = self.z3.Int(name)
                 elif vtype == "Real":
@@ -71,12 +75,12 @@ class Z3Solver:
                 elif vtype == "Bool":
                     z3_vars[name] = self.z3.Bool(name)
                 else:
-                    z3_vars[name] = self.z3.Int(name)
+                    raise ValueError(f"Unsupported variable type {vtype!r} for {name!r}.")
 
-            # Add constraints
-            for c in constraints:
-                # Evaluate the constraint string in a namespace with the z3 vars
-                expr = eval(c, {"__builtins__": {}}, z3_vars)  # noqa: S102 - controlled local namespace
+            # Validate and compile from a restricted AST; never eval user text.
+            compiler = ConstraintCompiler()
+            for constraint in constraints:
+                expr = compiler.compile_expression(constraint, z3_vars, self.z3)
                 solver.add(expr)
 
             check = solver.check()
@@ -116,10 +120,13 @@ class Z3Solver:
         conclusion: str,
         variables: list[tuple[str, str]],
     ) -> SMTResult:
-        """
-        Verify that `conclusion` logically follows from `premise`.
-        Returns satisfiable=False if the implication is invalid (i.e., the
-        negation of the conclusion is consistent with the premise).
+        """Search for a counterexample to ``premise => conclusion``.
+
+        A satisfiable result means the supplied premise and negated conclusion
+        are jointly satisfiable, so a counterexample exists. An unsatisfiable
+        result means no counterexample was found under this formula. Callers
+        must inspect ``detail`` because solver-unknown and errors are also
+        represented as ``satisfiable=False`` without a contradiction.
         """
         # To prove P => C, we check if P AND NOT C is unsat.
         negated = f"({conclusion}) == False" if "==" in conclusion else f"not ({conclusion})"
@@ -128,52 +135,34 @@ class Z3Solver:
 
 
 def smt_math_tool(problem_description: str) -> str:
-    """
-    High-level tool entry point for the II agent.
-    The model passes a natural-language math problem; this function
-    attempts to extract variables/constraints and solve via Z3.
-    For v11, this is a deterministic wrapper — the model is expected
-    to provide structured constraints, but we attempt a best-effort parse.
+    """Parse explicit VARIABLES/CONSTRAINTS lines and pass them to Z3.
+
+    This helper does not infer a formalization from free-form natural language.
+    Correctness of the modelled constraints remains the caller's responsibility.
     """
     try:
         solver = Z3Solver()
     except ImportError as exc:
         return f"Z3 solver not available: {exc}"
 
-    # Best-effort: look for explicit variable/constraint blocks in the problem text.
-    # The II agent should pass these in a structured format like:
-    #   VARIABLES: x Int, y Int
-    #   CONSTRAINTS: x > 0, x + y == 10
-    variables: list[tuple[str, str]] = []
-    constraints: list[str] = []
-
-    for line in problem_description.splitlines():
-        line = line.strip()
-        if line.upper().startswith("VARIABLES:"):
-            raw = line.split(":", 1)[1]
-            for item in raw.split(","):
-                item = item.strip()
-                if " " in item:
-                    name, vtype = item.split(" ", 1)
-                    variables.append((name.strip(), vtype.strip()))
-        elif line.upper().startswith("CONSTRAINTS:"):
-            raw = line.split(":", 1)[1]
-            constraints = [c.strip() for c in raw.split(",") if c.strip()]
-
-    if not constraints:
+    try:
+        formal_problem = ConstraintCompiler().parse_problem(problem_description)
+    except ValueError as exc:
         return (
-            "Z3 SMT Solver ready. Please provide constraints in this format:\n"
-            "VARIABLES: x Int, y Int\n"
-            "CONSTRAINTS: x > 0, x + y == 10, x * y == 21"
+            f"Invalid explicit constraints: {exc}\n"
+            "Expected format: VARIABLES: x Int, y Int\n"
+            "CONSTRAINTS: x > 0, y > 0, x + y == 10"
         )
 
-    result = solver.solve_constraints(variables, constraints)
+    variables = list(formal_problem.variables.items())
+    result = solver.solve_constraints(variables, list(formal_problem.constraints))
 
     if result.satisfiable:
         model_str = ", ".join(f"{k}={v}" for k, v in result.model.items())
         return f"SATISFIABLE. Solution: {model_str}\n{result.detail}"
-    else:
+    if result.contradiction:
         return f"UNSATISFIABLE. {result.contradiction}\n{result.detail}"
+    return f"SOLVER ERROR OR UNKNOWN. {result.detail}"
 
 
 if __name__ == "__main__":

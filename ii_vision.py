@@ -1,17 +1,16 @@
 """
-Part 11 / v11 — FIX 3: Quantized MobileCLIP + Semantic Visual Grounding
+Experimental image/text similarity prototype.
 
-Instead of raw pixel correlation (which Astra uses and can be fooled by),
-II uses MobileCLIP to convert screenshots into semantic visual embeddings,
-then grounds text queries ("broken", "cluttered", "misaligned") to exact
-bounding boxes. The 1.5B model writes CSS fixes from those coordinates.
-
-Note: MobileCLIP / transformers / torch must be installed separately.
+The current implementation does not identify object regions or produce reliable
+UI bounding boxes. It is intentionally not exposed as a supported app tool.
+Optional transformers/torch dependencies are required for its image-level
+similarity path.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 
@@ -24,12 +23,7 @@ class VisionMatch:
 
 
 class MobileCLIPGrounder:
-    """
-    Wrapper around a quantized MobileCLIP model for semantic visual grounding.
-
-    If transformers/torch are not available, falls back to a deterministic
-    heuristic (keyword-based) so the system still functions offline.
-    """
+    """Optional image/text similarity prototype; it does not localize objects."""
 
     def __init__(self, model_name: str = "apple/mobileclip-v1"):
         self.model_name = model_name
@@ -56,77 +50,45 @@ class MobileCLIPGrounder:
         image_path: str,
         query: str,
     ) -> Optional[VisionMatch]:
-        """
-        Find the bounding box in `image_path` that semantically matches `query`.
-        Returns normalized coordinates (0-1) or None if no match.
-        """
-        if not self._available:
-            return self._fallback_ground(image_path, query)
+        """Return image-level similarity metadata, not a localized object box."""
+        if not Path(image_path).is_file() or not self._available:
+            return None
 
         try:
             from PIL import Image  # type: ignore
             import torch  # type: ignore
 
             image = Image.open(image_path).convert("RGB")
-            inputs = self.processor(
-                text=[query],
-                images=image,
-                return_tensors="pt",
-            )
+            inputs = self.processor(text=[query], images=image, return_tensors="pt")
             with torch.no_grad():
                 outputs = self.model(**inputs)
-                logits_per_image = outputs.logits_per_image  # shape: [1, 1]
-                probs = logits_per_image.softmax(dim=-1)
-
-            # For a single image+text pair, we return a full-image match
-            # with confidence = similarity score. Real grounding would use
-            # region proposals + per-region similarity.
-            confidence = float(probs[0, 0])
+            # A one-image/one-query score cannot identify a region or be
+            # interpreted as a calibrated confidence. The full-image box is
+            # retained only as a compatibility field for this prototype.
+            similarity = float(outputs.logits_per_image[0, 0])
             return VisionMatch(
                 query=query,
                 bbox=(0.0, 0.0, 1.0, 1.0),
-                confidence=confidence,
-                label=query,
+                confidence=similarity,
+                label="whole-image similarity only",
             )
         except Exception:
-            return self._fallback_ground(image_path, query)
-
-    def _fallback_ground(self, image_path: str, query: str) -> VisionMatch:
-        """
-        Deterministic fallback: reports full image with keyword-based confidence.
-        Ensures the system works without torch/transformers installed.
-        """
-        q = query.lower()
-        confidence = 0.5
-        if any(w in q for w in ("broken", "cluttered", "misaligned", "ugly")):
-            confidence = 0.75
-        elif any(w in q for w in ("button", "input", "header")):
-            confidence = 0.6
-        return VisionMatch(
-            query=query,
-            bbox=(0.0, 0.0, 1.0, 1.0),
-            confidence=confidence,
-            label=query,
-        )
+            return None
 
 
 def vision_ground_tool(image_path: str, query: str) -> str:
-    """
-    High-level tool entry point for the II agent.
-    Grounds a text query to a visual region in a screenshot.
-    """
+    """Return prototype status; this function does not locate UI regions."""
     grounder = MobileCLIPGrounder()
     match = grounder.ground(image_path, query)
 
     if match is None:
-        return f"No visual match found for '{query}' in {image_path}."
+        if not Path(image_path).is_file():
+            return f"Image file not found: {image_path}"
+        return "Vision model unavailable; no visual result was produced."
 
-    x, y, w, h = match.bbox
     return (
-        f"VISUAL GROUNDING: '{match.query}' -> "
-        f"bbox=({x:.2f}, {y:.2f}, {w:.2f}, {h:.2f}) "
-        f"confidence={match.confidence:.2f}\n"
-        f"Use these coordinates to write the CSS/DOM fix."
+        f"IMAGE-LEVEL SIMILARITY ONLY for '{match.query}' "
+        f"(score={match.confidence:.3f}). The full-image compatibility box is not a localized UI region."
     )
 
 

@@ -1,25 +1,14 @@
-"""
-Module: ii_state.py — State Management for II v9.0
+"""JSON-backed checkpoints, state facts, decisions, and scratchpad storage.
 
-Implements the deterministic state layer that compensates for the small
-model's narrow context window:
-
-  1. Checkpointed State Machines — "save game" episodes so a 25-step
-     workflow doesn't collapse via 0.80^25 error compounding.
-  2. Dual-Ledger + Decision Hash — state_ledger.json (facts) +
-     decision_ledger.json (reasoning) + a 50-token hash injected on reset.
-  3. Externalized Scratchpad — scratchpad.txt with rolling-window
-     summarization (compress old steps to ~100 tokens).
-  4. Constraint Sharding ledger — tracks which rules pass/fail per pass.
-
-All state is stored as plain JSON / text files so it survives context wipes
-and model restarts (100% local, 100% private).
+Files are stored in the configured work directory. This module does not
+provide cross-device synchronization, model memory, or privacy guarantees.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import time
 from dataclasses import asdict, dataclass, field
@@ -265,6 +254,91 @@ class StateManager:
             if not v.get("passed"):
                 lines.append(f"  FAIL {v['rule_id']}: {v.get('detail', '')}")
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------ #
+    # Optional inference telemetry caches (bookkeeping only)
+    # ------------------------------------------------------------------ #
+    def record_negative_outcome(
+        self,
+        state: str,
+        action: str,
+        error: str,
+        penalty: float = 1.0,
+    ) -> str:
+        """Store a failed state/action/error tuple for future adapter use.
+
+        This cache is not connected to llama.cpp logits or LM Studio decoding;
+        it is persisted feedback metadata, not an active logit-bias mechanism.
+        """
+        if not isinstance(penalty, (int, float)) or not math.isfinite(float(penalty)) or penalty < 0:
+            raise ValueError("penalty must be a finite non-negative number.")
+        record = {
+            "type": "negative_logit_bias_cache",
+            "state_hash": hashlib.sha256(state.encode("utf-8")).hexdigest(),
+            "state_excerpt": state[:500],
+            "action": action[:300],
+            "error": error[:1000],
+            "penalty": float(penalty),
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        key = hashlib.sha256(
+            f"{record['state_hash']}|{record['action']}|{record['error']}".encode("utf-8")
+        ).hexdigest()[:16]
+        record["record_id"] = key
+        self._state_ledger.append(record)
+        self._save_json_list(self.state_ledger_path, self._state_ledger)
+        return key
+
+    def get_negative_logit_bias_cache(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Return recent failure records; values are not applied to model logits."""
+        if limit <= 0:
+            return []
+        records = [
+            entry for entry in self._state_ledger
+            if entry.get("type") == "negative_logit_bias_cache"
+        ]
+        return records[-limit:]
+
+    def record_task_vector_activation(
+        self, name: str, coefficient: float, *, applied: bool = False
+    ) -> None:
+        """Record requested activation metadata; applied means a hook was installed."""
+        if not math.isfinite(float(coefficient)):
+            raise ValueError("coefficient must be finite.")
+        self._state_ledger.append({
+            "type": "task_vector_activation",
+            "name": name,
+            "coefficient": float(coefficient),
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "applied": bool(applied),
+        })
+        self._save_json_list(self.state_ledger_path, self._state_ledger)
+
+    def record_kv_page(self, page_id: str, tier: str) -> None:
+        """Record a requested page tier; does not move/cache model KV tensors."""
+        self._state_ledger.append({
+            "type": "kv_page_index",
+            "page_id": page_id,
+            "tier": tier,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "transfer_performed": False,
+        })
+        self._save_json_list(self.state_ledger_path, self._state_ledger)
+
+    def get_kv_page_index(self, limit: int = 100) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        records = [entry for entry in self._state_ledger if entry.get("type") == "kv_page_index"]
+        return records[-limit:]
+
+    def get_task_vector_history(self, limit: int = 100) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        records = [
+            entry for entry in self._state_ledger
+            if entry.get("type") == "task_vector_activation"
+        ]
+        return records[-limit:]
 
     # ------------------------------------------------------------------ #
     # Internal helpers

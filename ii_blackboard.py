@@ -1,15 +1,7 @@
 """
-Part 11 / v11 — FIX 4: Blackboard Pattern + Interface-First Locking
-
-Solves context rot in multi-file software by separating architecture design
-from implementation:
-
-1. Blackboard: central JSON store of interfaces/data models/API contracts
-2. Architect Agent: writes interfaces to Blackboard (locked = read-only)
-3. Builder Agent: reads ONE locked interface, implements ONE file, never sees others
-4. Inspector Agent: runs static type checker across entire project, flags mismatches
-
-Guarantees 0% cross-file integration errors via deterministic structural locking.
+Experimental blackboard helpers for storing interface specifications and running
+basic project inspection. The current API supports listing and inspection; the
+architect/builder classes are not yet wired into the web or CLI workflows.
 """
 
 from __future__ import annotations
@@ -18,9 +10,10 @@ import ast
 import json
 import os
 import subprocess
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 
 @dataclass
@@ -44,8 +37,8 @@ class BlackboardEntry:
 
 class Blackboard:
     """
-    Central architecture database. Interfaces are written once, then locked.
-    Builders read locked interfaces and implement files in isolation.
+    Small JSON-backed store for interface records. Lock checks are enforced by
+    the public write methods, but this store does not validate generated code.
     """
 
     def __init__(self, workdir: str | Path = "."):
@@ -72,7 +65,10 @@ class Blackboard:
         entry_id: str,
         iface: InterfaceSpec,
     ) -> str:
-        """Write (or overwrite) an interface spec. Not locked yet."""
+        """Write an interface spec unless an existing record is locked."""
+        existing = self.entries.get(entry_id)
+        if existing is not None and existing.locked:
+            raise ValueError(f"Interface {entry_id!r} is locked and cannot be overwritten.")
         entry = BlackboardEntry(
             id=entry_id,
             type="interface",
@@ -113,7 +109,10 @@ class Blackboard:
         entry_id: str,
         content: dict,
     ) -> str:
-        """Write an API contract (endpoint specs, request/response schemas)."""
+        """Write an API contract unless an existing record is locked."""
+        existing = self.entries.get(entry_id)
+        if existing is not None and existing.locked:
+            raise ValueError(f"Contract {entry_id!r} is locked and cannot be overwritten.")
         entry = BlackboardEntry(
             id=entry_id,
             type="contract",
@@ -192,16 +191,29 @@ class BlackboardArchitect:
 
 
 class BlackboardBuilder:
-    """
-    Builder agent: reads ONE locked interface, implements ONE file.
-    Never sees the other 49 files — prevents context rot.
+    """Draft one file from a locked interface using a caller-supplied model.
+
+    The prompt is scoped to that interface, but the model context itself is not
+    isolated from other files or conversation history.
     """
 
     def __init__(self, blackboard: Blackboard):
         self.board = blackboard
 
-    def build_file(self, entry_id: str, model_chat_fn) -> Optional[str]:
-        """Implement the file described by the locked interface."""
+    def build_file(
+        self,
+        entry_id: str,
+        model_chat_fn: Callable[[str], str],
+        validation_fn: Callable[[Path], bool | tuple[bool, str]] | None = None,
+    ) -> Optional[str]:
+        """Write one statically parsed candidate and optionally roll back on failure.
+
+        ``validation_fn`` is an opt-in caller hook. If it executes candidate
+        code, it must provide genuine OS/container isolation; this class does
+        not supply a sandbox. A failed validation restores the prior file, using
+        ``git restore --worktree`` only when the file was clean relative to the
+        index before this operation, otherwise restoring an exact byte snapshot.
+        """
         iface = self.board.get_locked_interface(entry_id)
         if iface is None:
             return None
@@ -217,11 +229,100 @@ class BlackboardBuilder:
         )
         response = model_chat_fn(prompt)
         code = self._extract_code(response)
-        if code:
-            path = Path(iface.file)
-            path.write_text(code, encoding="utf-8")
+        if not code:
+            return None
+
+        from reasoning.verification_cascade import VerificationCascade
+        static_report = VerificationCascade().verify_python(code)
+        if not static_report.passed:
+            self.last_build_status = "Static syntax verification failed; file was not written."
+            return None
+
+        path = (self.board.workdir / iface.file).resolve()
+        if path != self.board.workdir and self.board.workdir not in path.parents:
+            raise ValueError("Interface file path must stay inside the configured workdir.")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existed = path.is_file()
+        original_bytes = path.read_bytes() if existed else None
+        original_mode = path.stat().st_mode if existed else None
+        relative = path.relative_to(self.board.workdir).as_posix()
+        git_clean = self._tracked_and_clean(relative)
+        temp_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=f".{path.name}.", suffix=".tmp", delete=False,
+            ) as file:
+                file.write(code)
+                temp_path = file.name
+            os.replace(temp_path, path)
+            temp_path = None
+
+            if validation_fn is not None:
+                verdict = validation_fn(path)
+                passed = verdict[0] if isinstance(verdict, tuple) else bool(verdict)
+                if not passed:
+                    self._restore_snapshot(path, existed, original_bytes, original_mode, relative, git_clean)
+                    self.last_build_status = "Validation failed; original file restored."
+                    return None
+            self.last_build_status = "Static checks passed; candidate file written."
             return str(path)
-        return None
+        except Exception as exc:
+            self._restore_snapshot(path, existed, original_bytes, original_mode, relative, git_clean)
+            self.last_build_status = f"Build validation raised {type(exc).__name__}; original file restored."
+            return None
+        finally:
+            if temp_path is not None:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+
+    def _tracked_and_clean(self, relative_path: str) -> bool:
+        try:
+            tracked = subprocess.run(
+                ["git", "ls-files", "--error-unmatch", "--", relative_path],
+                cwd=self.board.workdir, capture_output=True, text=True, timeout=5,
+            )
+            clean = subprocess.run(
+                ["git", "diff", "--quiet", "--", relative_path],
+                cwd=self.board.workdir, capture_output=True, timeout=5,
+            )
+            return tracked.returncode == 0 and clean.returncode == 0
+        except (FileNotFoundError, subprocess.SubprocessError):
+            return False
+
+    def _restore_snapshot(
+        self,
+        path: Path,
+        existed: bool,
+        original_bytes: bytes | None,
+        original_mode: int | None,
+        relative_path: str,
+        git_clean: bool,
+    ) -> None:
+        if not existed:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return
+        if git_clean:
+            try:
+                restored = subprocess.run(
+                    ["git", "restore", "--worktree", "--", relative_path],
+                    cwd=self.board.workdir, capture_output=True, text=True, timeout=5,
+                )
+                if restored.returncode == 0:
+                    return
+            except (FileNotFoundError, subprocess.SubprocessError):
+                pass
+        if original_bytes is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(original_bytes)
+            if original_mode is not None:
+                path.chmod(original_mode)
+
 
     @staticmethod
     def _extract_code(text: str) -> Optional[str]:
@@ -233,16 +334,47 @@ class BlackboardBuilder:
 
 
 class BlackboardInspector:
-    """
-    Inspector agent: runs static type checker across entire project,
-    flags cross-file mismatches by exact file and line.
+    """Return an approximate dependency graph and run a limited static check.
+
+    If mypy is installed it is invoked; otherwise only Python syntax is checked.
+    Neither path guarantees that cross-file contracts or runtime behavior are
+    correct.
     """
 
     def __init__(self, workdir: str | Path = "."):
         self.workdir = Path(workdir).resolve()
 
+    def dependency_graph(self) -> dict:
+        """Return an approximate, serializable file/symbol graph for review."""
+        from graph.topology import GraphTopologyAnalyzer
+        from ii_graph import CodebaseKnowledgeGraph
+
+        indexer = CodebaseKnowledgeGraph(str(self.workdir))
+        indexer.build_graph()
+        analyzer = GraphTopologyAnalyzer(indexer.graph)
+        nodes = [
+            {"id": str(node), **{
+                key: value for key, value in attributes.items()
+                if isinstance(value, (str, int, float, bool, type(None)))
+            }}
+            for node, attributes in indexer.graph.nodes(data=True)
+        ]
+        edges = [
+            {"source": str(source), "target": str(target), **dict(attributes)}
+            for source, target, attributes in indexer.graph.edges(data=True)
+            if attributes.get("relation") in {"calls_resolved", "imports_resolved"}
+        ]
+        return {
+            "approximate": True,
+            "architecture_map": analyzer.generate_architecture_map(),
+            "cycles": analyzer.find_cycles(),
+            "clusters": analyzer.cluster_subsystems(),
+            "nodes": nodes,
+            "edges": edges,
+        }
+
     def inspect(self) -> list[dict]:
-        """Run mypy/pyright if available, else basic AST syntax check."""
+        """Run mypy if available, else basic Python AST syntax checks."""
         issues = []
 
         # Try mypy first
@@ -278,7 +410,7 @@ class BlackboardInspector:
 def blackboard_tool(action: str, payload: str = "", workdir: str | Path = ".") -> str:
     """
     High-level tool entry point for the II agent.
-    Actions: "design", "build", "inspect", "list"
+    Actions: "inspect", "list", and an approximate "graph" summary.
     """
     board = Blackboard(workdir)
 
@@ -292,16 +424,19 @@ def blackboard_tool(action: str, payload: str = "", workdir: str | Path = ".") -
         return "\n".join(lines)
 
     if action == "inspect":
-        inspector = BlackboardInspector()
+        inspector = BlackboardInspector(workdir)
         issues = inspector.inspect()
         if not issues:
-            return "INSPECTION PASSED: No cross-file or syntax issues found."
+            return "INSPECTION COMPLETE: No issues reported by the available checker; correctness is not established."
         lines = ["INSPECTION ISSUES:"]
         for iss in issues:
             lines.append(f"  {iss['source']}: {iss['file']}:{iss['line']} - {iss['message']}")
         return "\n".join(lines)
 
-    return f"Unknown blackboard action: {action}. Use: design, build, inspect, list"
+    if action == "graph":
+        return json.dumps(BlackboardInspector(workdir).dependency_graph(), indent=2)
+
+    return f"Unknown blackboard action: {action}. Use: inspect, list, graph"
 
 
 if __name__ == "__main__":

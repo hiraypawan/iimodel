@@ -1,0 +1,13 @@
+<div class="ii-table-wrap">
+  <table>
+    <caption>{{ caption|e }}</caption>
+    <thead><tr>{% for column in columns %}<th scope="col">{{ column.label|e }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>{% for column in columns %}<td>{{ row[column.key]|e }}</td>{% endfor %}</tr>
+    {% else %}
+      <tr><td colspan="{{ columns|length }}">{{ empty_label|default('No records found.')|e }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>

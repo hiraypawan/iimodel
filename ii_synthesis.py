@@ -1,13 +1,9 @@
 """
-Part 11 / v11 — FIX 2: Enumerative Program Synthesis (Kolmogorov Complexity)
+Bounded expression search over a small set of arithmetic and list primitives.
 
-True mathematical invention via exhaustive search over primitive building blocks.
-Given input/output behavior, the synthesizer enumerates every combination of
-primitives (starting from the simplest) until it finds the shortest program
-that matches — the lowest Kolmogorov Complexity solution.
-
-No neural guessing. Deterministic exhaustive search beats probabilistic
-interpolation from training data.
+Given examples, this prototype enumerates candidate expressions up to a depth
+and work limit. It can match simple examples but does not search all programs or
+produce a general proof of correctness.
 """
 
 from __future__ import annotations
@@ -60,6 +56,7 @@ class EnumerativeSynthesizer:
         examples: list[tuple[list, object]],
         max_lines: int = 3,
         max_combinations: int = 20000,
+        verification_hook: Callable[[str], bool | tuple[bool, str]] | None = None,
     ) -> SynthesisResult:
         """
         Find the shortest program that maps inputs -> outputs for all examples.
@@ -81,9 +78,15 @@ class EnumerativeSynthesizer:
                     )
                 if self._matches_all(combo, examples):
                     code = self._expr_to_code(combo)
+                    if verification_hook is not None:
+                        verdict = verification_hook(code)
+                        accepted = verdict[0] if isinstance(verdict, tuple) else bool(verdict)
+                        if not accepted:
+                            continue
+                    suffix = " Caller-supplied verification hook returned pass; no general proof is implied." if verification_hook else ""
                     return SynthesisResult(
                         True, code, depth,
-                        f"Found match at depth {depth} after {tested} tests.",
+                        f"Found match at depth {depth} after {tested} tests.{suffix}",
                     )
 
         return SynthesisResult(
@@ -123,18 +126,6 @@ class EnumerativeSynthesizer:
                     for right in self._gen(depth - 1, slots):
                         yield (pname, [left, right])
 
-    def _eval_expr(self, expr: tuple, env: dict) -> object:
-        kind = expr[0]
-        if kind == "slot":
-            return env[expr[1]]
-        pname = kind
-        args = [self._eval_expr(a, env) for a in expr[1]]
-        func = self.primitives[pname]
-        try:
-            return func(*args)
-        except Exception:
-            return None
-
     def _matches_all(self, expr: tuple, examples: list[tuple[list, object]]) -> bool:
         for inputs, expected in examples:
             env = {f"x{i}": v for i, v in enumerate(inputs)}
@@ -168,27 +159,33 @@ class EnumerativeSynthesizer:
 
 
 def synthesis_tool(examples_json: str) -> str:
-    """
-    High-level tool entry point for the II agent.
-    examples_json: JSON string like [[[1, 2], 3], [[5, 7], 12]]
-    Represents input/output examples to synthesize a program for.
-    """
+    """Find a matching expression for JSON examples like [[[1, 2], 3]]."""
     import json
 
     try:
         examples = json.loads(examples_json)
-    except json.JSONDecodeError:
+    except (TypeError, json.JSONDecodeError):
         return "Invalid JSON. Provide examples as: [[[1, 2], 3], [[5, 7], 12]]"
+
+    if not isinstance(examples, list) or not examples:
+        return "Invalid examples: expected a non-empty list of [inputs, output] pairs."
+    for example in examples:
+        if (
+            not isinstance(example, list)
+            or len(example) != 2
+            or not isinstance(example[0], list)
+        ):
+            return "Invalid examples: each item must be [input_list, expected_output]."
 
     synth = EnumerativeSynthesizer()
     result = synth.synthesize(examples, max_lines=3)
 
     if result.found:
         return (
-            f"SYNTHESIZED (Kolmogorov-optimal, {result.lines} lines):\n"
+            f"MATCHING EXPRESSION (bounded search, depth {result.lines}):\n"
             f"{result.code}\n{result.detail}"
         )
-    return f"SYNTHESIS FAILED. {result.detail}"
+    return f"NO MATCH FOUND. {result.detail}"
 
 
 if __name__ == "__main__":
