@@ -282,6 +282,13 @@ CITATION RULES (MANDATORY for web-derived answers):
   5. If no source supports a claim, say "insufficient evidence".
   6. Before finalizing, re-read your answer and verify every [n] maps to a real source returned by the search tool.
 
+CRITICAL RULES:
+  1. NEVER output raw JSON tool-call blocks like {"name": "...", "arguments": {...}} as your final response.
+  2. Always call tools through the proper tool-calling interface, then write natural language text.
+  3. If you call a tool, WAIT for the result, then write your answer in plain text.
+  4. Never output raw function-call JSON as your final response to the user.
+  5. Every web fact MUST have a citation [1], [2], etc.
+
 Guidance:
 1. State uncertainty and verify important claims.
 2. Treat retrieved passages as unverified excerpts; lexical conflict flags are review prompts only. Say “insufficient evidence” when appropriate.
@@ -391,6 +398,31 @@ def extract_code_block(text: str) -> Optional[str]:
     return None
 
 
+def _is_raw_tool_json(text: str) -> bool:
+    """Detect if the model output is raw JSON tool-call instead of natural language."""
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        import json as _json
+        data = _json.loads(stripped)
+        return isinstance(data, dict) and "name" in data and "arguments" in data
+    except Exception:
+        return False
+
+
+def _execute_raw_tool_call(tool_call_dict: dict) -> str:
+    """Execute a raw JSON tool-call dict as if it came from proper tool calling."""
+    fn = tool_call_dict.get("name", "")
+    args = tool_call_dict.get("arguments", {})
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except Exception:
+            args = {}
+    return dispatch_tool(fn, args)
+
+
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
@@ -443,7 +475,9 @@ def api_chat():
             temperature=0.2,
         )
         tool_calls = resp.get("tool_calls") or []
+        content = resp.get("content", "") or ""
 
+        # Case 1: Model made proper tool calls
         if tool_calls:
             messages.append(resp)
             for tc in tool_calls:
@@ -453,7 +487,6 @@ def api_chat():
                     args = json.loads(args)
                 observation = dispatch_tool(fn, args)
 
-                # Cache research sources for citation verification
                 if fn == "research":
                     try:
                         research_data = json.loads(observation)
@@ -471,7 +504,41 @@ def api_chat():
                 )
             continue
 
-        final_text = resp.get("content", "")
+        # Case 2: Model output raw JSON tool-call instead of proper tool call
+        if _is_raw_tool_json(content):
+            try:
+                import json as _json
+                tool_call_dict = _json.loads(content)
+                fn = tool_call_dict.get("name", "")
+                args = tool_call_dict.get("arguments", {})
+                if isinstance(args, str):
+                    args = json.loads(args)
+                observation = dispatch_tool(fn, args)
+
+                if fn == "research":
+                    try:
+                        research_data = json.loads(observation)
+                        research_sources = research_data.get("sources", {})
+                    except json.JSONDecodeError:
+                        pass
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": "raw_" + str(abs(hash(content))),
+                        "name": fn,
+                        "content": observation,
+                    }
+                )
+                messages.append(
+                    {"role": "system", "content": "The tool result is above. Now write your final answer in plain text with citations [1], [2], etc. Do NOT output raw JSON."}
+                )
+                continue
+            except Exception:
+                pass
+
+        # Case 3: Model gave final text answer
+        final_text = content
         messages.append({"role": "assistant", "content": final_text})
         break
 
