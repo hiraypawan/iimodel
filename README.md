@@ -126,8 +126,7 @@ current test run.
 
 ## Limitations, sources, and safety
 
-Read [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) for deferred features and
-unmeasured claims. [`docs/VENDOR_CREDITS.md`](docs/VENDOR_CREDITS.md) records
+Read [`docs/VENDOR_CREDITS.md`](docs/VENDOR_CREDITS.md) for license references.
 license references and clarifies that no third-party source code was copied into
 `vendor/`. The project code is licensed under MIT; see [`LICENSE`](LICENSE).
 Model weights remain subject to their own license and terms.
