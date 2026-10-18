@@ -401,6 +401,11 @@ def extract_code_block(text: str) -> Optional[str]:
 def _is_raw_tool_json(text: str) -> bool:
     """Detect if the model output is raw JSON tool-call instead of natural language."""
     stripped = text.strip()
+    # Strip markdown code fences
+    if stripped.startswith("```"):
+        lines = stripped.split("\n")
+        if len(lines) > 2:
+            stripped = "\n".join(lines[1:-1]).strip()
     if not stripped.startswith("{"):
         return False
     try:
@@ -409,6 +414,25 @@ def _is_raw_tool_json(text: str) -> bool:
         return isinstance(data, dict) and "name" in data and "arguments" in data
     except Exception:
         return False
+
+
+def _extract_raw_tool_json(text: str) -> str | None:
+    """Extract raw JSON tool-call from text, handling markdown fences."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.split("\n")
+        if len(lines) > 2:
+            stripped = "\n".join(lines[1:-1]).strip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        import json as _json
+        data = _json.loads(stripped)
+        if isinstance(data, dict) and "name" in data and "arguments" in data:
+            return stripped
+    except Exception:
+        pass
+    return None
 
 
 def _execute_raw_tool_call(tool_call_dict: dict) -> str:
@@ -505,10 +529,11 @@ def api_chat():
             continue
 
         # Case 2: Model output raw JSON tool-call instead of proper tool call
-        if _is_raw_tool_json(content):
+        raw_json = _extract_raw_tool_json(content)
+        if raw_json:
             try:
                 import json as _json
-                tool_call_dict = _json.loads(content)
+                tool_call_dict = _json.loads(raw_json)
                 fn = tool_call_dict.get("name", "")
                 args = tool_call_dict.get("arguments", {})
                 if isinstance(args, str):
@@ -525,7 +550,7 @@ def api_chat():
                 messages.append(
                     {
                         "role": "tool",
-                        "tool_call_id": "raw_" + str(abs(hash(content))),
+                        "tool_call_id": "raw_" + str(abs(hash(raw_json))),
                         "name": fn,
                         "content": observation,
                     }
@@ -563,6 +588,14 @@ def api_chat():
         )
         final_text = resp.get("content", "") or ""
         citation_verification = verify_answer_citations(final_text, research_sources)
+
+    # Final safety: if final_text is still raw JSON tool-call, give a helpful error
+    if _extract_raw_tool_json(final_text):
+        final_text = (
+            "I tried to use a tool but couldn't process the result properly. "
+            "Please try asking your question again, or ask a simpler question."
+        )
+        citation_verification = {"verified": True, "missing_citations": [], "unused_sources": []}
 
     code = extract_code_block(final_text)
     if code:
