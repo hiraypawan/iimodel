@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ii_blackboard import Blackboard, BlackboardBuilder, BlackboardInspector, InterfaceSpec
+from blackboard.ii_blackboard import Blackboard, BlackboardBuilder, BlackboardInspector, InterfaceSpec
 
 
 class BlackboardExtensionTests(unittest.TestCase):

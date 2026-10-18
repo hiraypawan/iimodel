@@ -1,1 +1,3 @@
-"""Compatibility package for optional web, vision, and UI heuristic tools."""
+"""Tool construction: the self-tool builder and the compatibility facades."""
+
+__all__ = []

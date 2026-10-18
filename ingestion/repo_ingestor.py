@@ -18,9 +18,9 @@ from typing import Any
 import networkx as nx
 
 from graph.topology import GraphTopologyAnalyzer
-from ii_graph import CodebaseKnowledgeGraph
+from graph.ii_graph import CodebaseKnowledgeGraph
 from ingestion.license_checker import check_license
-from ii_security import is_private_mode, web_blocked_message
+from core.ii_security import is_private_mode, web_blocked_message
 
 GRAPH_CACHE_NAME = ".graph_cache"
 

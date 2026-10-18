@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ii_graph import CodebaseKnowledgeGraph, HAS_TREE_SITTER
+from graph.ii_graph import CodebaseKnowledgeGraph, HAS_TREE_SITTER
 
 
 class CodebaseGraphTests(unittest.TestCase):

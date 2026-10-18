@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from vendor.orthogonal_steering import load_vector, register_steering_pre_hook, save_vector
+from archive.vendor.orthogonal_steering import load_vector, register_steering_pre_hook, save_vector
 
 STYLE_NAMES = (
     "warm_empathetic",

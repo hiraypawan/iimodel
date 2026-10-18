@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import hmac
 from pathlib import Path
 from typing import Optional
 
@@ -48,8 +49,8 @@ _ensure_llama_cpp()
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 
-from ii_graph import CodebaseKnowledgeGraph  # noqa: E402
-from ii_web import (  # noqa: E402
+from graph.ii_graph import CodebaseKnowledgeGraph  # noqa: E402
+from ingestion.ii_web import (  # noqa: E402
     search_web,
     read_url,
     fetch_url_metadata,
@@ -58,17 +59,17 @@ from ii_web import (  # noqa: E402
     research_and_answer,
     verify_answer_citations,
 )
-from ii_state import StateManager  # noqa: E402
-from ii_constraints import ConstraintSharder, default_constraints  # noqa: E402
+from core.ii_state import StateManager  # noqa: E402
+from reasoning.ii_constraints import ConstraintSharder, default_constraints  # noqa: E402
 from graph.topology import GraphTopologyAnalyzer  # noqa: E402
 from reasoning.verification_cascade import VerificationCascade  # noqa: E402
 
 # Local GGUF model backend (supports llama-cpp-python, LM Studio, or demo fallback)
-from llama_local import LocalModel  # noqa: E402
+from core.llama_local import LocalModel  # noqa: E402
 
 # Optional helper modules
 try:
-    from ii_smt import Z3Solver, smt_math_tool  # noqa: E402
+    from reasoning.ii_smt import Z3Solver, smt_math_tool  # noqa: E402
     import z3 as _z3  # noqa: F401, E402
     _SMT_AVAILABLE = True
 except ImportError:
@@ -77,7 +78,7 @@ except ImportError:
     _SMT_AVAILABLE = False
 
 try:
-    from ii_synthesis import EnumerativeSynthesizer, synthesis_tool  # noqa: E402
+    from reasoning.ii_synthesis import EnumerativeSynthesizer, synthesis_tool  # noqa: E402
     _SYNTH_AVAILABLE = True
 except ImportError:
     EnumerativeSynthesizer = None  # type: ignore[assignment]
@@ -85,7 +86,7 @@ except ImportError:
     _SYNTH_AVAILABLE = False
 
 try:
-    from ii_vision import MobileCLIPGrounder, vision_ground_tool  # noqa: E402
+    from archive.ii_vision import MobileCLIPGrounder, vision_ground_tool  # noqa: E402
     # The current implementation returns image-level matches, not localized regions.
     # Keep it out of the agent's tool list until actual grounding is implemented.
     _VISION_AVAILABLE = False
@@ -94,8 +95,8 @@ except ImportError:
     vision_ground_tool = None  # type: ignore[assignment]
     _VISION_AVAILABLE = False
 
-from ii_blackboard import Blackboard, blackboard_tool  # noqa: E402  # pure Python
-from ii_security import (  # noqa: E402
+from blackboard.ii_blackboard import Blackboard, blackboard_tool  # noqa: E402  # pure Python
+from core.ii_security import (  # noqa: E402
     is_private_mode,
     run_python_code,
     sandbox_mode,
@@ -116,6 +117,49 @@ def _active_tools() -> list:
 # Flask app
 # --------------------------------------------------------------------------- #
 app = Flask(__name__, template_folder="templates", static_folder="static")
+
+
+# --------------------------------------------------------------------------- #
+# API authentication
+#
+# ``II_API_KEY`` enables authentication for every ``/api/*`` route.  When the
+# variable is unset the API is *not* authenticated -- which is only safe
+# because the server binds to 127.0.0.1 by default.  The status endpoint
+# always reports which mode is active.
+# --------------------------------------------------------------------------- #
+def api_key_configured() -> bool:
+    """True when an API key is configured in the environment."""
+    return bool((os.environ.get("II_API_KEY") or "").strip())
+
+
+def _request_api_key() -> str:
+    header = request.headers.get("X-II-API-Key", "")
+    if header and header.strip():
+        return header.strip()
+    authorization = request.headers.get("Authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return ""
+
+
+@app.before_request
+def _enforce_api_key():
+    """Refuse unauthenticated API calls with HTTP 401 when a key is set."""
+    if not request.path.startswith("/api/"):
+        return None
+    if not api_key_configured():
+        return None
+    expected = (os.environ.get("II_API_KEY") or "").strip()
+    provided = _request_api_key()
+    if provided and hmac.compare_digest(provided, expected):
+        return None
+    return jsonify({
+        "error": "unauthorized",
+        "detail": (
+            "This API requires the II_API_KEY. Send it as the "
+            "'X-II-API-Key' header or as 'Authorization: Bearer <key>'."
+        ),
+    }), 401
 
 # --------------------------------------------------------------------------- #
 # Globals (loaded once at startup)
@@ -274,7 +318,7 @@ TOOLS.append(
     },
 )
 
-SYSTEM_PROMPT_TEMPLATE = """You are II (Identity: II v2.0), developed by Pawan Hiray. Never claim to be Anthropic, OpenAI, or any other company.
+SYSTEM_PROMPT_TEMPLATE = """You are II (Identity: II v3.0), developed by Pawan Hiray. Never claim to be Anthropic, OpenAI, or any other company.
 Always assist normal questions (time, repos, verification). Never refuse with "I'm sorry, I cannot assist". Only decline illegal/harmful requests.
 If asked "who made you?" say: "Pawan Hiray developed me; I am II."
 {web_instruction}
@@ -468,13 +512,87 @@ def _execute_raw_tool_call(tool_call_dict: dict) -> str:
 # --------------------------------------------------------------------------- #
 @app.route("/")
 def index():
-    return render_template("chat.html")
+    return render_template("chat.html", api_key=(os.environ.get("II_API_KEY") or "").strip())
+
+
+def _pipeline_stages() -> dict:
+    """Report which pipeline stages are actually usable right now.
+
+    The report is truthful: a stage is only "active" when its dependencies
+    are importable and its preconditions hold.
+    """
+    from core.nlp import HAS_SPACY, nlp_backend
+    from core.caged_renderer import STRICT_SYSTEM_PROMPT  # noqa: F401
+
+    stages: dict[str, dict] = {}
+
+    def stage(name: str, active: bool, detail: str) -> None:
+        stages[name] = {"active": bool(active), "detail": detail}
+
+    stage(
+        "logic_tree",
+        True,
+        "reasoning.logic_tree_solver -- multi-hop decomposition and cited "
+        "extraction (no LLM).",
+    )
+    stage(
+        "ingestion",
+        not is_private_mode(),
+        "Web search/fetch are disabled under II_PRIVATE." if is_private_mode()
+        else "ingestion.ii_web -- live search and SSRF-guarded fetch.",
+    )
+    stage(
+        "exocortex",
+        True,
+        "memory.exocortex -- disk-backed paged memory (opt-in, never silent).",
+    )
+    stage(
+        "interviewer",
+        True,
+        "interaction.interviewer -- slot extraction, at most two questions.",
+    )
+    stage(
+        "empathy",
+        True,
+        "interaction.ii_empathy_module -- crisis-first support with sources.",
+    )
+    stage(
+        "brainstorming",
+        not is_private_mode(),
+        "interaction.ii_brainstorming_engine -- mechanical SCAMPER "
+        "recombination of live components.",
+    )
+    stage(
+        "hypothesis",
+        not is_private_mode(),
+        "invention.combinatorial_hypothesis_engine -- sandbox-tested toy "
+        "simulations (never 'verified').",
+    )
+    stage(
+        "self_tool_builder",
+        sandbox_mode() == "docker",
+        "tools.self_tool_builder -- requires the fail-closed Docker sandbox.",
+    )
+    stage(
+        "caged_renderer",
+        MODEL is not None and MODEL.mode in ("gguf", "lmstudio"),
+        "The renderer needs a local model; without one the deterministic "
+        "JSON renderer is used.",
+    )
+    stage(
+        "nlp",
+        True,
+        f"spaCy available={HAS_SPACY}; backend={nlp_backend()}",
+    )
+    return stages
 
 
 @app.route("/api/status", methods=["GET"])
 def api_status():
     backend = MODEL.mode if MODEL is not None else "not_initialized"
     return jsonify({
+        "version": "3.0",
+        "identity": "II -- Pure Internet Intelligence (deterministic reasoning system)",
         "backend": backend,
         "chat_ready": backend in ("gguf", "lmstudio"),
         "model_file_present": MODEL_PATH.is_file(),
@@ -487,6 +605,49 @@ def api_status():
         "private_mode": is_private_mode(),
         "web_tools_enabled": not is_private_mode(),
         "code_sandbox": sandbox_mode(),
+        "api_auth": "api-key" if api_key_configured() else "disabled (localhost only)",
+        "pipeline_stages": _pipeline_stages(),
+        "llm_role": (
+            "The 1.5B model is the renderer: it formats structured JSON into "
+            "natural language and generates sandbox-verified code snippets. "
+            "All reasoning, logic and conclusions come from deterministic "
+            "Python algorithms."
+        ),
+    })
+
+
+# --------------------------------------------------------------------------- #
+# Pure II chat: the deterministic pipeline (default)
+# --------------------------------------------------------------------------- #
+def _pure_ii_chat(user_message: str):
+    """Run the Pure II router and return its structured result."""
+    from core.ii_agent import route_task
+
+    try:
+        result = route_task(user_message)
+    except Exception as exc:  # pragma: no cover - defensive
+        return jsonify({
+            "error": f"pipeline failure: {type(exc).__name__}: {exc}",
+            "response": (
+                "The pipeline could not complete this request. No answer was "
+                "invented."
+            ),
+            "status": "INSUFFICIENT_DATA",
+        }), 500
+
+    return jsonify({
+        "response": result.get("answer", ""),
+        "status": result.get("status", "INSUFFICIENT_DATA"),
+        "intent": result.get("intent"),
+        "confidence": result.get("confidence"),
+        "pipeline": result.get("pipeline"),
+        "questions": result.get("questions", []),
+        "constraint_tree": result.get("constraint_tree", {}),
+        "sources": result.get("sources", []),
+        "event_log": result.get("event_log", []),
+        "raw": result.get("raw", {}),
+        "agentic": True,
+        "demo": False,
     })
 
 
@@ -497,6 +658,14 @@ def api_chat():
     if not user_message:
         return jsonify({"error": "empty message"}), 400
 
+    pipeline = (data.get("pipeline") or "pure_ii").strip().lower()
+    if pipeline in {"pure_ii", "pure-ii", "ii", "default"}:
+        return _pure_ii_chat(user_message)
+
+    # ------------------------------------------------------------------ #
+    # Legacy path: model-driven tool calling (kept for comparison and for
+    # users who want the older agentic behaviour).
+    # ------------------------------------------------------------------ #
     # Agentic mode: if LM Studio is unavailable, use pure internet + search synthesis
     agentic_mode = (MODEL is None or MODEL.mode == "demo")
 
@@ -1125,31 +1294,17 @@ def api_vision():
 
 @app.route("/api/steer", methods=["GET", "POST"])
 def api_steer():
-    from vibe.steering import SteeringController
-
-    controller = SteeringController()
-    if request.method == "GET":
-        return jsonify({
-            "supported_styles": controller.list_supported_styles(),
-            "available_vectors": controller.list_available_vectors(),
-            "applied": False,
-            "active": False,
-        })
-    data = request.get_json(force=True) or {}
-    action = data.get("action", "list")
-    if action == "list":
-        return jsonify({
-            "supported_styles": controller.list_supported_styles(),
-            "available_vectors": controller.list_available_vectors(),
-            "applied": False,
-            "active": False,
-        })
-    if action == "apply":
-        return jsonify({
-            "error": "activation steering is unavailable: the active model backend has no compatible hidden-state hook or reviewed vector",
-            "applied": False,
-        }), 501
-    return jsonify({"error": "action must be 'list' or 'apply'"}), 400
+    """Activation steering was archived in II v3.0 (see ``archive/``)."""
+    return jsonify({
+        "error": (
+            "activation steering is not part of Pure II: the experimental "
+            "steering/probe modules were moved to archive/ and are not wired "
+            "into the runtime."
+        ),
+        "applied": False,
+        "active": False,
+        "archived": True,
+    }), 501
 
 
 @app.route("/api/repos/ingest", methods=["POST"])
@@ -1216,8 +1371,120 @@ def api_blackboard():
 
 @app.route("/api/blackboard/graph", methods=["GET"])
 def api_blackboard_graph():
-    from ii_blackboard import BlackboardInspector
+    from blackboard.ii_blackboard import BlackboardInspector
     return jsonify(BlackboardInspector(WORKDIR).dependency_graph())
+
+
+# --------------------------------------------------------------------------- #
+# Pure II stage endpoints
+# --------------------------------------------------------------------------- #
+@app.route("/api/solve", methods=["POST"])
+def api_solve():
+    """Run the logic-tree solver directly and return its structured result."""
+    from reasoning.logic_tree_solver import LogicTreeSolver
+
+    data = request.get_json(force=True) or {}
+    query = (data.get("query") or "").strip()
+    if not query:
+        return jsonify({"error": "empty query"}), 400
+    result = LogicTreeSolver().solve(query)
+    return jsonify(result)
+
+
+@app.route("/api/interview", methods=["POST"])
+def api_interview():
+    """Extract constraints and (at most) two clarifying questions."""
+    from interaction.interviewer import Interviewer
+
+    data = request.get_json(force=True) or {}
+    prompt = (data.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"error": "empty prompt"}), 400
+    interviewer = Interviewer()
+    tree = interviewer.build_constraint_tree(prompt)
+    asked = interviewer.ask_questions(prompt)
+    return jsonify({
+        "constraint_tree": tree,
+        "questions": asked["questions"],
+        "proceed_with_defaults": asked["proceed_with_defaults"],
+    })
+
+
+@app.route("/api/memory", methods=["GET"])
+def api_memory():
+    """Show exactly what the Exocortex remembers (transparency view)."""
+    from memory.exocortex import Exocortex
+
+    exocortex = Exocortex()
+    return jsonify({
+        "description": exocortex.describe(),
+        "facts": exocortex.what_i_remember(),
+        "episodes": exocortex.episodes(limit=10),
+        "tool_runs": exocortex.tool_runs(limit=10),
+    })
+
+
+@app.route("/api/memory/optin", methods=["POST"])
+def api_memory_optin():
+    """Grant or revoke the user's consent for memory (profiling is opt-in)."""
+    from memory.exocortex import Exocortex
+
+    data = request.get_json(force=True) or {}
+    granted = bool(data.get("granted", True))
+    exocortex = Exocortex()
+    state = exocortex.set_consent(granted)
+    return jsonify({
+        "consent_state": state,
+        "fact_count": len(exocortex.what_i_remember()),
+        "note": (
+            "Memory is opt-in. Revoking consent deletes the stored facts."
+            if granted else
+            "Consent revoked; the stored facts were deleted."
+        ),
+    })
+
+
+@app.route("/api/memory/forget", methods=["POST"])
+def api_memory_forget():
+    """Forget one stored fact (or all of them)."""
+    from memory.exocortex import Exocortex
+
+    data = request.get_json(force=True) or {}
+    key = (data.get("key") or "").strip()
+    exocortex = Exocortex()
+    if key:
+        removed = exocortex.forget(key)
+        return jsonify({"forgotten": removed, "key": key})
+    removed = exocortex.forget_all()
+    return jsonify({"forgotten": removed, "key": None, "all": True})
+
+
+@app.route("/api/brainstorm", methods=["POST"])
+def api_brainstorm():
+    """Mechanical recombination of live components (never invention)."""
+    from interaction.ii_brainstorming_engine import BrainstormingEngine
+
+    data = request.get_json(force=True) or {}
+    topic = (data.get("topic") or "").strip()
+    if not topic:
+        return jsonify({"error": "empty topic"}), 400
+    engine = BrainstormingEngine(llm=MODEL)
+    return jsonify(engine.generate(topic))
+
+
+@app.route("/api/hypothesize", methods=["POST"])
+def api_hypothesize():
+    """Sandbox-tested toy hypotheses (status is SIMULATED, never VERIFIED)."""
+    from invention.combinatorial_hypothesis_engine import (
+        CombinatorialHypothesisEngine,
+    )
+
+    data = request.get_json(force=True) or {}
+    statement = (data.get("problem") or data.get("problem_statement") or "").strip()
+    if not statement:
+        return jsonify({"error": "empty problem statement"}), 400
+    engine = CombinatorialHypothesisEngine(llm=MODEL)
+    return jsonify(engine.test_hypotheses(statement))
 
 
 # --------------------------------------------------------------------------- #
@@ -1293,6 +1560,39 @@ def init_backend():
     print("=" * 50)
 
 
+def _exposure_warning(host: str) -> str:
+    """Return a loud warning when the server is exposed beyond localhost."""
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        return ""
+    return (
+        "\n" + "!" * 74 + "\n"
+        f"  WARNING: II is about to bind to {host} -- a NON-LOCAL address.\n"
+        "  The API is a local research tool: it runs live web requests and\n"
+        "  (in some modes) generated code. Anyone who can reach this port can\n"
+        "  use it. Set II_API_KEY to require a key, keep the host on 127.0.0.1,\n"
+        "  or put the server behind an authenticating reverse proxy.\n"
+        + "!" * 74 + "\n"
+    )
+
+
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="II -- Pure Internet Intelligence (deterministic reasoning system)"
+    )
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="interface to bind (default: 127.0.0.1, localhost only)")
+    parser.add_argument("--port", type=int, default=5000, help="port to bind")
+    args = parser.parse_args()
+
+    warning = _exposure_warning(args.host)
+    if warning:
+        print(warning)
+    if not api_key_configured() and args.host not in {"127.0.0.1", "localhost", "::1"}:
+        print(
+            "[WARNING] II_API_KEY is not set: the API is unauthenticated on "
+            f"{args.host}. Set II_API_KEY before exposing this server."
+        )
     init_backend()
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(host=args.host, port=args.port, debug=False)

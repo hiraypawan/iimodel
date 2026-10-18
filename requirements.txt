@@ -1,4 +1,4 @@
-# II v2.0 -- default install is the lean core.
+# II v3.0 -- default install is the lean core.
 # Heavy/optional integrations: requirements-optional.txt
 # Development tools:            requirements-dev.txt
 -r requirements-core.txt

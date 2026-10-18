@@ -2,7 +2,7 @@
 cd /d "%~dp0"
 echo.
 echo ========================================
-echo   II v2.0 - Install and Run
+echo   II v3.0 - Install and Run
 echo ========================================
 echo.
 echo This installs the lean core dependencies (requirements.txt) into .venv\
@@ -44,7 +44,7 @@ if not exist "models\qwen2.5-1.5b-instruct-q4_0.gguf" (
     echo.
 )
 
-echo Starting II v2.0 server...
+echo Starting II v3.0 server...
 echo   Open http://127.0.0.1:5000 in your browser
 echo.
 .venv\Scripts\python.exe app.py

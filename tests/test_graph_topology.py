@@ -7,7 +7,7 @@ from pathlib import Path
 import networkx as nx
 
 from graph.topology import GraphTopologyAnalyzer
-from ii_graph import CodebaseKnowledgeGraph
+from graph.ii_graph import CodebaseKnowledgeGraph
 
 
 class GraphTopologyTests(unittest.TestCase):

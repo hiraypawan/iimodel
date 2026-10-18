@@ -1,1 +1,3 @@
-"""Compatibility package for the Flask server."""
+"""Server-side helpers: the Flask app facade and the UI heuristics."""
+
+__all__ = []

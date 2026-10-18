@@ -1,8 +1,8 @@
-# II v2.0 -- core dependencies (lean install for the working features)
+# II v3.0 -- core dependencies (lean install for the working features)
 # Install:  pip install -r requirements.txt   (which installs this file)
 # Optional heavy extras live in requirements-optional.txt; dev tools in
 # requirements-dev.txt.  Nothing here is pre-installed in a venv any more:
-# create one with `py -3.11 -m venv .venv` / `python3.11 -m venv .venv`.
+# create one with `python3.11 -m venv .venv` / `py -3.11 -m venv .venv`.
 
 # --- Web app ---
 flask>=3.0.0
@@ -22,6 +22,22 @@ tree-sitter-typescript>=0.23.0,<0.24.0
 duckduckgo-search>=4.1.0
 trafilatura>=1.6.0
 
+# --- Deterministic NLP (entity extraction, dependency parse) ---
+# The pipeline works without the small English model: core/nlp.py falls back
+# to explicit regex rules and reports the backend it used.
+spacy>=3.7.0
+# Install the small model separately (it is not on PyPI):
+#   python -m spacy download en_core_web_sm
+
+# --- Sentiment buckets for the empathy module ---
+vaderSentiment>=3.3.2
+
+# --- Exocortex vector index (TF-IDF keyword vectors, disk backed) ---
+faiss-cpu>=1.7.4
+
+# --- SMT solver (explicit-formula constraint tool) ---
+z3-solver>=4.12.0.0
+
 # --- Local model backend (direct GGUF) ---
 # If no prebuilt wheel exists for your platform, skip this line and use
 # LM Studio instead:  pip install llama-cpp-python --only-binary=:all:
@@ -29,6 +45,3 @@ llama-cpp-python>=0.2.0
 
 # --- Schema validation (benchmark packets, UI component catalog) ---
 jsonschema>=4.0.0
-
-# --- SMT solver (explicit-formula constraint tool) ---
-z3-solver>=4.12.0.0

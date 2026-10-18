@@ -11,10 +11,12 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import app as app_module
-from ii_constraints import Constraint, ConstraintSharder
-from ii_graph import CodebaseKnowledgeGraph
-from ii_state import StateManager
-from llama_local import DummyModel, LMStudioModel
+from reasoning.ii_constraints import Constraint, ConstraintSharder
+from graph.ii_graph import CodebaseKnowledgeGraph
+from core.ii_state import StateManager
+from core.llama_local import DummyModel, LMStudioModel
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class AppSmokeTests(unittest.TestCase):
@@ -22,7 +24,7 @@ class AppSmokeTests(unittest.TestCase):
     def setUpClass(cls):
         cls.state_tmp = tempfile.TemporaryDirectory()
         app_module.MODEL = DummyModel()
-        app_module.KG = CodebaseKnowledgeGraph(str(Path(__file__).resolve().parent))
+        app_module.KG = CodebaseKnowledgeGraph(str(ROOT))
         app_module.KG.build_graph()
         app_module.STATE = StateManager(cls.state_tmp.name)
         app_module.SHARDER = None
@@ -47,13 +49,32 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(body["backend"], "demo")
         self.assertFalse(body["chat_ready"])
         self.assertIn("huggingface.co/Qwen/", body["setup_message"])
+        self.assertEqual(body["version"], "3.0")
+        self.assertIn("logic_tree", body["pipeline_stages"])
+        self.assertIn("renderer", body["llm_role"])
 
-    def test_chat_reports_demo_instead_of_faking_model_output(self):
-        # II_PRIVATE makes this deterministic and offline: with no model
-        # backend, chat must report demo mode rather than invent an answer
-        # or silently fall back to web search.
+    def test_pure_ii_chat_fails_closed_without_sources(self):
+        # II_PRIVATE makes this deterministic and offline: the Pure II
+        # pipeline must report that it could not verify anything instead of
+        # inventing an answer.
         with patch.dict("os.environ", {"II_PRIVATE": "1"}):
-            response = self.client.post("/api/chat", json={"message": "hello"})
+            response = self.client.post(
+                "/api/chat", json={"message": "What is the capital of France?"}
+            )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["status"], "INSUFFICIENT_DATA")
+        self.assertIn("No verified answer", body["response"])
+        self.assertNotIn("As an AI", body["response"])
+        self.assertEqual(body["sources"], [])
+
+    def test_legacy_chat_reports_demo_instead_of_faking_model_output(self):
+        # The legacy tool-calling path still reports demo mode rather than
+        # inventing an answer or silently falling back to web search.
+        with patch.dict("os.environ", {"II_PRIVATE": "1"}):
+            response = self.client.post(
+                "/api/chat", json={"message": "hello", "pipeline": "legacy"}
+            )
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
         self.assertTrue(body["demo"])
@@ -180,11 +201,11 @@ class AppSmokeTests(unittest.TestCase):
         self.assertTrue(response.get_json()["graph_is_approximate"])
         query.assert_called_once_with("example/project", "main")
 
-    def test_steering_api_lists_slots_but_does_not_claim_activation(self):
+    def test_steering_api_is_archived_and_never_claims_activation(self):
         listed = self.client.get("/api/steer")
-        self.assertEqual(listed.status_code, 200)
-        self.assertEqual(listed.get_json()["available_vectors"], [])
-        self.assertFalse(listed.get_json()["active"])
+        self.assertEqual(listed.status_code, 501)
+        self.assertFalse(listed.get_json()["applied"])
+        self.assertTrue(listed.get_json()["archived"])
         applied = self.client.post("/api/steer", json={"action": "apply", "name": "warm_empathetic"})
         self.assertEqual(applied.status_code, 501)
         self.assertFalse(applied.get_json()["applied"])
@@ -212,7 +233,7 @@ class AppSmokeTests(unittest.TestCase):
     def test_lm_studio_uses_the_model_id_reported_by_the_server(self):
         response = Mock(status_code=200)
         response.json.return_value = {"data": [{"id": "qwen-loaded-model"}]}
-        with patch("llama_local.requests.get", return_value=response):
+        with patch("core.llama_local.requests.get", return_value=response):
             backend = LMStudioModel()
         self.assertTrue(backend._available)
         self.assertEqual(backend.model_name, "qwen-loaded-model")

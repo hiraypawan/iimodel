@@ -1,8 +1,13 @@
 """
-main.py — Command-line entry point for the II prototype.
+main.py — Command-line entry point for II v3.0.
 
-Commands expose the current experimental helpers. Chat requires a configured
-local model backend; graph builds a repository symbol index.
+The Pure II commands (``ask``, ``solve``, ``interview``, ``brainstorm``,
+``hypothesize``, ``memory``) run the deterministic pipeline: live cited
+sources, graph traversal and DAG orchestration.  The local model, when one is
+configured, is only the renderer.
+
+The remaining commands expose the earlier helpers (repository graph, SMT,
+bounded synthesis, the experimental blackboard, repository ingestion).
 """
 
 from __future__ import annotations
@@ -13,13 +18,13 @@ import json
 import sys
 from pathlib import Path
 
-from ii_graph import CodebaseKnowledgeGraph
+from graph.ii_graph import CodebaseKnowledgeGraph
 from graph.topology import GraphTopologyAnalyzer
 from reasoning.verification_cascade import VerificationCascade
-from ii_smt import Z3Solver, smt_math_tool
-from ii_synthesis import synthesis_tool
-from ii_vision import vision_ground_tool
-from ii_blackboard import blackboard_tool
+from reasoning.ii_smt import Z3Solver, smt_math_tool
+from reasoning.ii_synthesis import synthesis_tool
+from archive.ii_vision import vision_ground_tool
+from blackboard.ii_blackboard import blackboard_tool
 
 
 def main():
@@ -29,7 +34,7 @@ def main():
         pass
 
     parser = argparse.ArgumentParser(
-        description="II local tool-augmented agent prototype"
+        description="II v3.0 - Pure Internet Intelligence (deterministic reasoning; the LLM only renders)"
     )
     parser.add_argument(
         "command",
@@ -41,13 +46,25 @@ def main():
             "vision",
             "blackboard",
             "topology",
-            "spectral",  # Compatibility alias for the approximate topology summary.
+            "spectral",  # Deprecated alias for 'topology' (prints a warning).
             "verify",
             "steer",
             "benchmark",
             "ingest",
+            "solve",
+            "memory",
+            "interview",
+            "brainstorm",
+            "hypothesize",
+            "ask",
         ],
         help="Command to run",
+    )
+    parser.add_argument(
+        "query",
+        nargs="?",
+        default=None,
+        help="Inline input for the command (alternative to --input)",
     )
     parser.add_argument(
         "--input",
@@ -58,8 +75,9 @@ def main():
     parser.add_argument("--full-cascade", action="store_true", help="Require all injected verification gates; unavailable gates fail closed")
     parser.add_argument("--required-symbol", action="append", default=[], help="Required Python function/class name for verify")
     parser.add_argument("--forbidden-call", action="append", default=[], help="Forbidden call name for verify")
-    parser.add_argument("--action", choices=["list", "apply"], default="list", help="steer action")
+    parser.add_argument("--action", choices=["list", "apply", "optin", "optout", "forget", "show"], default="list", help="steer / memory action")
     parser.add_argument("--vector", help="Named user-supplied steering vector")
+    parser.add_argument("--key", help="Memory key (used by: memory forget --key NAME)")
     parser.add_argument("--repo", help="Public GitHub URL for ingest")
     parser.add_argument("--dataset", type=Path, help="Benchmark task JSON")
     parser.add_argument("--responses", type=Path, help="Single-system JSON/JSONL responses")
@@ -74,9 +92,9 @@ def main():
     args = parser.parse_args()
 
     if args.command == "chat":
-        from ii_agent import run_agent
+        from core.ii_agent import run_agent
 
-        prompt = args.input or input("Enter prompt: ")
+        prompt = args.query or args.input or input("Enter prompt: ")
         run_agent(prompt)
 
     elif args.command == "graph":
@@ -88,13 +106,19 @@ def main():
         print(kg.get_repository_index()[:2000] + "\n...[truncated]")
 
     elif args.command in {"topology", "spectral"}:
+        if args.command == "spectral":
+            print(
+                "[DEPRECATED] 'spectral' is a deprecated alias for 'topology'. "
+                "The analysis is SCC detection, PageRank and community "
+                "clustering -- not eigenvalue-based spectral methods."
+            )
         kg = CodebaseKnowledgeGraph(".")
         kg.build_graph()
         analyzer = GraphTopologyAnalyzer(kg.graph)
         print(analyzer.generate_architecture_map())
 
     elif args.command == "verify":
-        input_path = Path(args.input) if args.input else None
+        input_path = Path(args.query or args.input) if (args.query or args.input) else None
         if input_path is not None and input_path.is_file():
             code = input_path.read_text(encoding="utf-8")
         else:
@@ -127,21 +151,21 @@ def main():
             print(f"[UNAVAILABLE] {exc}")
             return
         print("[INFO] Z3 checks explicit constraints; it does not parse natural-language math.")
-        variables = args.input or input("Variables (e.g., x Int, y Int): ")
+        variables = args.query or args.input or input("Variables (e.g., x Int, y Int): ")
         constraints = input("Constraints (e.g., x > 0, y > 0, x + y == 10): ")
         problem = f"VARIABLES: {variables}\nCONSTRAINTS: {constraints}"
         print(smt_math_tool(problem))
 
     elif args.command == "synthesize":
         print("[SYNTH] Bounded expression search")
-        examples = args.input or input(
+        examples = args.query or args.input or input(
             'Examples JSON (e.g., [[[1, 2], 3], [[5, 7], 12]]): '
         )
         print(synthesis_tool(examples))
 
     elif args.command == "vision":
         print("[VISION] Experimental image/text similarity; it does not localize regions")
-        image_path = args.input or input("Screenshot path (e.g., screenshot.png): ")
+        image_path = args.query or args.input or input("Screenshot path (e.g., screenshot.png): ")
         query = input("Query (e.g., misaligned button): ")
         print(vision_ground_tool(image_path, query))
 
@@ -154,23 +178,12 @@ def main():
             print("Unsupported action. Use: inspect, list, or graph")
 
     elif args.command == "steer":
-        from vibe.steering import SteeringController
-
-        controller = SteeringController()
-        if args.action == "list":
-            print(json.dumps({
-                "supported_styles": controller.list_supported_styles(),
-                "available_vectors": controller.list_available_vectors(),
-                "applied": False,
-            }, indent=2))
-        else:
-            if not args.vector:
-                parser.error("steer --action apply requires --vector NAME")
-            print(
-                "[UNAVAILABLE] Steering requires a model-layer hook and a reviewed "
-                "vector file; the current GGUF/LM Studio adapters expose neither."
-            )
-            raise SystemExit(2)
+        print(
+            "[ARCHIVED] Activation steering is not part of Pure II. The "
+            "experimental steering/probe modules live in archive/ and are not "
+            "wired into the runtime."
+        )
+        raise SystemExit(2)
 
     elif args.command == "benchmark":
         from tests.benchmarks.eval_runner import (
@@ -231,6 +244,77 @@ def main():
         except (ValueError, RuntimeError, FileExistsError, PermissionError) as exc:
             print(f"[INGEST FAILED] {exc}")
             raise SystemExit(1)
+
+    elif args.command == "solve":
+        from reasoning.logic_tree_solver import LogicTreeSolver
+
+        query = args.query or args.input or input("Question: ")
+        result = LogicTreeSolver().solve(query)
+        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+        if result.get("status") != "VERIFIED":
+            raise SystemExit(2)
+
+    elif args.command == "ask":
+        from core.ii_agent import route_task
+
+        prompt = args.query or args.input or input("Prompt: ")
+        result = route_task(prompt)
+        print(result.get("answer", ""))
+        print()
+        print(f"[STATUS] {result.get('status')} | intent={result.get('intent')} "
+              f"| confidence={result.get('confidence')}")
+        if result.get("questions"):
+            print("[QUESTIONS]")
+            for question in result["questions"]:
+                print(f"  - {question['question']}")
+
+    elif args.command == "interview":
+        from interaction.interviewer import Interviewer
+
+        prompt = args.query or args.input or input("Task: ")
+        interviewer = Interviewer()
+        tree = interviewer.build_constraint_tree(prompt)
+        asked = interviewer.ask_questions(prompt)
+        print(json.dumps({
+            "constraint_tree": tree,
+            "questions": asked["questions"],
+            "proceed_with_defaults": asked["proceed_with_defaults"],
+        }, indent=2, ensure_ascii=False))
+
+    elif args.command == "brainstorm":
+        from interaction.ii_brainstorming_engine import BrainstormingEngine
+
+        topic = args.query or args.input or input("Topic: ")
+        print(BrainstormingEngine().format(topic))
+
+    elif args.command == "hypothesize":
+        from invention.combinatorial_hypothesis_engine import (
+            CombinatorialHypothesisEngine,
+        )
+
+        statement = args.query or args.input or input("Problem statement: ")
+        result = CombinatorialHypothesisEngine().test_hypotheses(statement)
+        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+    elif args.command == "memory":
+        from memory.exocortex import Exocortex
+
+        exocortex = Exocortex()
+        action = (args.action or "show").lower()
+        if action in {"optin", "on", "grant"}:
+            print(f"Consent state: {exocortex.set_consent(True)}")
+        elif action in {"optout", "off", "revoke"}:
+            print(f"Consent state: {exocortex.set_consent(False)}")
+        elif action == "forget":
+            if args.key:
+                print("Forgotten." if exocortex.forget(args.key) else "No such key.")
+            else:
+                print(f"Forgotten {exocortex.forget_all()} fact(s).")
+        else:
+            print(json.dumps({
+                "description": exocortex.describe(),
+                "facts": exocortex.what_i_remember(),
+            }, indent=2, ensure_ascii=False, default=str))
 
 
 if __name__ == "__main__":

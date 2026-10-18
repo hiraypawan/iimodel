@@ -14,9 +14,7 @@ later claim verification.
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -27,7 +25,7 @@ from typing import Optional
 import trafilatura
 from duckduckgo_search import DDGS
 
-from ii_security import is_private_mode, validate_public_url, web_blocked_message
+from core.ii_security import is_private_mode, validate_public_url, web_blocked_message
 
 try:
     import requests  # type: ignore
@@ -473,7 +471,6 @@ def search_web(query: str, max_results: int = 5,
     backends_used: list[str] = []
     seen_links: set[str] = set()
     # Cache check (300s TTL)
-    import time
     cache_key = query.lower().strip()
     cached = _search_cache.get(cache_key)
     if cached:
@@ -602,14 +599,6 @@ def search_web(query: str, max_results: int = 5,
             "source": r.source,
             "authority_score": r.authority_score,
         }
-
-    payload = SearchResponse(
-        query=query,
-        results=all_results,
-        total_found=len(all_results),
-        backends_used=backends_used,
-        citation_map=citation_map,
-    )
 
     # Build a model-ready text block with citation instructions
     lines = [
@@ -769,7 +758,6 @@ class ResearchEngine:
         search_text = search_web(query, max_results=self.max_search_results)
         search_json = self._extract_json_from_search(search_text)
         results = search_json.get("results", [])
-        citation_map = search_json.get("citation_map", {})
 
         for r in results:
             cid = r.get("citation_id", "[?]")
@@ -929,6 +917,112 @@ def format_source_tag(result) -> str:
         f"{passages}\n"
         f"{escape(result.text)}\n</source>"
     )
+
+
+# --------------------------------------------------------------------------- #
+# Structured search + fetch helpers (used by the Pure II pipeline)
+# --------------------------------------------------------------------------- #
+
+def _parse_search_payload(search_text: str) -> dict:
+    """Extract the machine-readable block that ``search_web`` appends."""
+    start = search_text.find("RAW_JSON_START")
+    end = search_text.find("RAW_JSON_END")
+    if start == -1 or end == -1 or end < start:
+        return {}
+    blob = search_text[start + len("RAW_JSON_START"):end].strip()
+    try:
+        payload = json.loads(blob)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def search_results(query: str, max_results: int = 5) -> SearchResponse:
+    """Return structured search results (same backends as :func:`search_web`).
+
+    This is the API the logic-tree solver, Exocortex and hypothesis engine
+    use: they need URLs, titles and snippets -- not a formatted prompt block.
+    """
+    if is_private_mode():
+        return SearchResponse(
+            query=query, results=[], total_found=0, backends_used=[],
+            citation_map={},
+        )
+    text = search_web(query, max_results=max_results)
+    payload = _parse_search_payload(text)
+    results: list[SearchResult] = []
+    for raw in payload.get("results", []):
+        try:
+            results.append(SearchResult(**raw))
+        except Exception:
+            continue
+    return SearchResponse(
+        query=query,
+        results=results,
+        total_found=len(results),
+        backends_used=list(payload.get("backends_used", [])),
+        citation_map=dict(payload.get("citation_map", {})),
+    )
+
+
+def fetch_page_text(url: str, timeout: int = 15, max_chars: int = 12000) -> dict:
+    """Download and extract a public page.
+
+    Returns ``{"url", "text", "title", "success", "error"}``.  The URL passes
+    the SSRF guard before any request is made.  Under ``II_PRIVATE`` the call
+    fails closed without touching the network.
+    """
+    if is_private_mode():
+        return {
+            "url": url, "text": "", "title": None, "success": False,
+            "error": web_blocked_message("fetch_page_text"),
+        }
+    try:
+        safe_url = validate_public_url(url)
+    except ValueError as exc:
+        return {
+            "url": url, "text": "", "title": None, "success": False,
+            "error": f"blocked URL: {exc}",
+        }
+    try:
+        import requests
+
+        response = requests.get(
+            safe_url,
+            timeout=timeout,
+            headers={"User-Agent": "II-Pure-Internet-Intelligence/3.0 (+local research tool)"},
+        )
+        response.raise_for_status()
+        html = response.content
+        title = None
+        try:
+            title = trafilatura.extract_metadata(html).title
+        except Exception:
+            title = None
+        text = trafilatura.extract(
+            html,
+            include_comments=False,
+            include_tables=True,
+            no_fallback=True,
+        )
+        if not text:
+            text = trafilatura.extract(html, no_fallback=False) or ""
+        if not text:
+            return {
+                "url": safe_url, "text": "", "title": title, "success": False,
+                "error": "no readable content found",
+            }
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n...[truncated]"
+        return {
+            "url": safe_url, "text": text, "title": title, "success": True,
+            "error": None,
+        }
+    except Exception as exc:
+        return {
+            "url": url, "text": "", "title": None, "success": False,
+            "error": str(exc),
+        }
 
 
 # --------------------------------------------------------------------------- #

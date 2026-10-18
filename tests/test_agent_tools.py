@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-import ii_agent
+import core.ii_agent as ii_agent
 
 
 class AgentToolTests(unittest.TestCase):
