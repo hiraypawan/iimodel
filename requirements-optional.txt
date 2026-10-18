@@ -1,0 +1,11 @@
+# Optional model/runtime integrations. They are not required for the core app.
+# Installing these does not guarantee that the active backend exposes hidden
+# states, KV-cache forks, logits, or constrained-decoding hooks.
+llama-cpp-python>=0.2.0
+z3-solver>=4.12.0
+torch>=2.0.0
+transformers>=4.30.0
+Pillow>=10.0.0
+
+# Optional type-checker used by the Blackboard inspector.
+mypy>=1.5.0

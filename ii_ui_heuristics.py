@@ -1,16 +1,9 @@
-"""
-Module 2: ii_ui_heuristics.py — Playwright UI Design Math Engine
+"""Experimental browser-based UI heuristics.
 
-Ported directly from Plan.md Part 6, Module 2.
-Scans a URL with Playwright, extracts getBoundingClientRect() + computed styles,
-and returns a mathematical UI Scorecard:
-
-  CHECK A: Alignment Math — button/heading center vs parent center (>5px = FAIL)
-  CHECK B: Spacing Math — padding must be on 8pt grid
-  CHECK C: WCAG Contrast Math — contrast ratio must be >= 4.5:1 (WCAG AA)
-
-Designed so the 1.5B model receives mathematical "UI Scorecard" data instead of
-raw pixels (synthetic vision via coordinates/math per Plan.md).
+When Playwright and Chromium are installed, this module inspects a URL and flags
+some simple alignment, spacing, and text/background contrast heuristics. These
+checks are incomplete and may produce false positives; they are not a complete
+accessibility or design audit. Visiting a URL makes an outbound request.
 """
 
 from __future__ import annotations
@@ -162,7 +155,7 @@ if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else (
         "https://en.wikipedia.org/wiki/Artificial_intelligence"
     )
-    print(f"[VISION] Scanning UI Math for: {target}")
+    print(f"[UI CHECK] Running heuristic scan for: {target}")
     ui_scorecard = audit_ui_layout_sync(target)
     print(f"\n[SCORECARD] UI HEURISTICS ({len(ui_scorecard)} issues found):")
     print(json.dumps(ui_scorecard[:5], indent=2))

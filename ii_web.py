@@ -1,20 +1,16 @@
-"""
-Module: ii_web.py — Web Search + Clean Extraction (Trafilatura)
+"""Optional web search and URL text extraction helpers.
 
-Provides the II agent with live internet access:
-  - search_web(query) -> DuckDuckGo HTML results (title, link, snippet)
-  - read_url(url) -> clean Markdown article text via Trafilatura
-  - fetch_with_authority(url) -> extraction + HTTP Last-Modified / domain authority tag
-
-This is the "internet-as-brain" layer. The model does not memorize the web;
-it queries it live and reads clean, deterministic text.
+These functions make outbound network requests. Search results, extracted page
+text, modification dates, and heuristic domain scores may be incomplete or
+incorrect; they are context for the model, not source verification.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from html import escape
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -35,17 +31,15 @@ class FetchResult:
     title: Optional[str]
     text: str
     last_modified: Optional[str]
-    domain_authority: int
+    heuristic_domain_score: int
     fetched_at: str
     success: bool
     error: Optional[str] = None
+    evidence_passages: list[dict[str, str]] = field(default_factory=list)
 
 
-def _domain_authority(domain: str) -> int:
-    """
-    Heuristic domain-authority score (0-100).
-    Deterministic, no external API required. Used to filter web junk.
-    """
+def _heuristic_domain_score(domain: str) -> int:
+    """Return a simple rule-based score; it is not a reputation assessment."""
     trusted_tlds = (".edu", ".gov", ".org")
     trusted_domains = (
         "github.com", "stackoverflow.com", "mozilla.org",
@@ -88,10 +82,7 @@ def search_web(query: str, max_results: int = 5, region: str = "wt-wt") -> str:
 
 
 def read_url(url: str, max_chars: int = 4000) -> str:
-    """
-    Fetch a URL and extract clean Markdown article text via Trafilatura.
-    Truncates to max_chars to protect the small model's context window.
-    """
+    """Fetch a URL and extract readable text, truncated to ``max_chars``."""
     try:
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
@@ -111,19 +102,120 @@ def read_url(url: str, max_chars: int = 4000) -> str:
         return f"Extraction failed: {exc}"
 
 
-def fetch_with_authority(url: str, max_chars: int = 4000) -> FetchResult:
+def extract_evidence_passages(
+    text: str,
+    source_url: str,
+    *,
+    max_passages: int = 5,
+    max_chars: int = 600,
+) -> list[dict[str, str]]:
+    """Retain short exact substrings with their source URL for later review.
+
+    These snippets are quotations from extracted page text, not verified
+    evidence that a claim is true or that extraction preserved page context.
     """
-    Fetch a URL, extract clean text, and attach authority metadata:
-      - HTTP Last-Modified header (recency)
-      - Domain authority score
-    The model can weight claims by (authority × recency).
-    """
+    if max_passages < 0 or max_chars < 1:
+        raise ValueError("max_passages must be non-negative and max_chars positive.")
+    if max_passages == 0:
+        return []
+    passages: list[dict[str, str]] = []
+    for candidate in re.split(r"(?<=[.!?])\s+|\n+", text):
+        quote = candidate.strip()
+        if not quote:
+            continue
+        if len(quote) > max_chars:
+            quote = quote[:max_chars].rstrip() + "…"
+        passages.append({"source_url": source_url, "quote": quote})
+        if len(passages) >= max_passages:
+            break
+    return passages
+
+
+def candidate_contradictions(passages: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Flag rough lexical/numeric disagreements for human review only."""
+    stopwords = {"the", "and", "for", "with", "from", "that", "this", "was", "are", "is", "to", "of", "in", "on", "a", "an"}
+    negation = re.compile(r"\b(?:not|no|never|neither|without|isn't|wasn't|doesn't|didn't)\b", re.I)
+    numbers = re.compile(r"(?<![A-Za-z])[-+]?\d+(?:\.\d+)?%?")
+    parsed = []
+    for passage in passages:
+        quote = passage.get("quote", "")
+        words = {word.lower() for word in re.findall(r"[A-Za-z]{3,}", quote)} - stopwords
+        parsed.append((passage, words, set(numbers.findall(quote)), bool(negation.search(quote))))
+    conflicts: list[dict[str, str]] = []
+    for index, left in enumerate(parsed):
+        for right in parsed[index + 1:]:
+            if left[0].get("source_url") == right[0].get("source_url"):
+                continue
+            shared = left[1] & right[1]
+            if len(shared) < 2:
+                continue
+            reasons = []
+            if left[2] and right[2] and left[2] != right[2]:
+                reasons.append("numeric_literals_differ")
+            if left[3] != right[3]:
+                reasons.append("negation_marker_differs")
+            if reasons:
+                conflicts.append({
+                    "left_url": left[0].get("source_url", ""),
+                    "right_url": right[0].get("source_url", ""),
+                    "shared_terms": ", ".join(sorted(shared)[:8]),
+                    "signals": ", ".join(reasons),
+                    "note": "Heuristic disagreement candidate; human review required.",
+                })
+    return conflicts
+
+
+def build_evidence_report(query: str, sources: list[FetchResult | dict]) -> dict:
+    """Create a mechanical retrieval report and abstain when no text matches."""
+    passages: list[dict[str, str]] = []
+    for source in sources:
+        if isinstance(source, FetchResult):
+            passages.extend(source.evidence_passages)
+        elif isinstance(source, dict):
+            value = source.get("evidence_passages", [])
+            if isinstance(value, list):
+                passages.extend(item for item in value if isinstance(item, dict))
+    query_terms = {word.lower() for word in re.findall(r"[A-Za-z]{3,}", query)}
+    matched = [
+        passage for passage in passages
+        if query_terms & {word.lower() for word in re.findall(r"[A-Za-z]{3,}", passage.get("quote", ""))}
+    ]
+    return {
+        "status": "retrieval_candidates_only" if matched else "insufficient_evidence",
+        "query": query,
+        "passages": matched,
+        "possible_conflicts": candidate_contradictions(passages),
+        "human_review_required": True,
+        "factual_correctness_assessed": False,
+    }
+
+
+def fetch_evidence(url: str, max_chars: int = 4000) -> dict:
+    """Fetch one source and return passage metadata with an explicit caveat."""
+    result = fetch_url_metadata(url, max_chars=max_chars)
+    return {
+        "status": "retrieved_unverified" if result.success and result.evidence_passages else "insufficient_evidence",
+        "source_url": result.url,
+        "title": result.title,
+        "fetched_at": result.fetched_at,
+        "last_modified": result.last_modified,
+        "heuristic_domain_score": result.heuristic_domain_score,
+        "text": result.text,
+        "evidence_passages": result.evidence_passages,
+        "possible_conflicts": [],
+        "factual_correctness_assessed": False,
+        "note": "Extracted text and quoted passages require source/context review.",
+    }
+
+
+def fetch_url_metadata(url: str, max_chars: int = 4000) -> FetchResult:
+    """Fetch/extract a URL and attach a best-effort date and heuristic score."""
     import urllib.request
     from urllib.parse import urlparse
 
     fetched_at = datetime.now(timezone.utc).isoformat()
     domain = urlparse(url).netloc.lower()
-    authority = _domain_authority(domain)
+    domain_score = _heuristic_domain_score(domain)
     last_modified: Optional[str] = None
 
     try:
@@ -137,33 +229,38 @@ def fetch_with_authority(url: str, max_chars: int = 4000) -> FetchResult:
         pass  # header fetch is best-effort
 
     text = read_url(url, max_chars=max_chars)
-    success = not text.startswith("Extraction failed") and not text.startswith(
-        "Extraction failed"
-    )
+    success = not text.startswith("Extraction failed")
 
     return FetchResult(
         url=url,
         title=None,
         text=text,
         last_modified=last_modified,
-        domain_authority=authority,
+        heuristic_domain_score=domain_score,
         fetched_at=fetched_at,
         success=success,
         error=None if success else text,
+        evidence_passages=extract_evidence_passages(text, url) if success else [],
     )
 
 
 def format_source_tag(result: FetchResult) -> str:
     """
-    Produce an XML-style source tag for injection into the model prompt:
-      <source url="..." date="..." authority="N">...</source>
-    Helps the model weigh contradictory sources deterministically.
+    Produce a source tag with URL, date, and heuristic domain-score metadata.
+    It does not verify the source or resolve conflicting claims.
     """
-    date = result.last_modified or "unknown"
+    date = escape(result.last_modified or "unknown", quote=True)
+    url = escape(result.url, quote=True)
+    passages = "\n".join(
+        "<quoted_passage>" + escape(item.get("quote", "")) + "</quoted_passage>"
+        for item in result.evidence_passages
+    )
     return (
-        f'<source url="{result.url}" date="{date}" '
-        f'authority="{result.domain_authority}">\n'
-        f'{result.text}\n</source>'
+        f'<source url="{url}" date="{date}" '
+        f'domain_score="{result.heuristic_domain_score}" '
+        'domain_score_type="heuristic_not_credibility">\n'
+        f"{passages}\n"
+        f"{escape(result.text)}\n</source>"
     )
 
 

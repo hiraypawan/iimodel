@@ -1,0 +1,5 @@
+<dialog id="{{ dialog_id|e }}" aria-labelledby="{{ heading_id|e }}"{% if open|default(false) %} open{% endif %}>
+  <h2 id="{{ heading_id|e }}">{{ title|e }}</h2>
+  <div>{{ body|e }}</div>
+  <form method="dialog"><button type="submit">{{ close_label|default('Close')|e }}</button></form>
+</dialog>

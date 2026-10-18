@@ -1,0 +1,698 @@
+{
+  "schema_version": "1.0",
+  "components": [
+    {
+      "id": "ui.button.primary.v1",
+      "kind": "component",
+      "name": "PrimaryButton",
+      "summary": "Primary action button.",
+      "tags": [
+        "button",
+        "primary",
+        "form"
+      ],
+      "status": "candidate",
+      "target": {
+        "framework": "flask",
+        "language": "jinja",
+        "styling": "plain-css"
+      },
+      "source": {
+        "url": "https://github.com/hiraypawan/iimodel",
+        "revision": "arena/c056808c-iimodel",
+        "path": "blackboard/component_catalog/components/primary_button.html.j2",
+        "content_sha256": "227b5eaf9d82828aa8d5ad2802c2b104aeb697f63f259b9377d32d623c2dfed3"
+      },
+      "license": {
+        "spdx_id": "MIT",
+        "license_url": "https://github.com/hiraypawan/iimodel/blob/arena/c056808c-iimodel/LICENSE",
+        "review_status": "pending",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "notice_required": true
+      },
+      "dependencies": [],
+      "entrypoint": "blackboard/component_catalog/components/primary_button.html.j2",
+      "export_name": "PrimaryButton",
+      "props_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "button_type": {
+            "enum": [
+              "button",
+              "submit",
+              "reset"
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "slots": {},
+      "validation": {
+        "build": "not_run",
+        "unit_tests": "not_run",
+        "accessibility": "not_run",
+        "visual_review": "not_reviewed",
+        "notes": "Original II candidate; requires manual integration/review."
+      }
+    },
+    {
+      "id": "ui.button.secondary.v1",
+      "kind": "component",
+      "name": "SecondaryButton",
+      "summary": "Secondary action button.",
+      "tags": [
+        "button",
+        "secondary",
+        "form"
+      ],
+      "status": "candidate",
+      "target": {
+        "framework": "flask",
+        "language": "jinja",
+        "styling": "plain-css"
+      },
+      "source": {
+        "url": "https://github.com/hiraypawan/iimodel",
+        "revision": "arena/c056808c-iimodel",
+        "path": "blackboard/component_catalog/components/secondary_button.html.j2",
+        "content_sha256": "04503c13857c9fb680117533d6b1ffefb5809be456cf75f666c019ed90f4be9d"
+      },
+      "license": {
+        "spdx_id": "MIT",
+        "license_url": "https://github.com/hiraypawan/iimodel/blob/arena/c056808c-iimodel/LICENSE",
+        "review_status": "pending",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "notice_required": true
+      },
+      "dependencies": [],
+      "entrypoint": "blackboard/component_catalog/components/secondary_button.html.j2",
+      "export_name": "SecondaryButton",
+      "props_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "button_type": {
+            "enum": [
+              "button",
+              "submit",
+              "reset"
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "slots": {},
+      "validation": {
+        "build": "not_run",
+        "unit_tests": "not_run",
+        "accessibility": "not_run",
+        "visual_review": "not_reviewed",
+        "notes": "Original II candidate; requires manual integration/review."
+      }
+    },
+    {
+      "id": "ui.input.text.v1",
+      "kind": "component",
+      "name": "TextInput",
+      "summary": "Labeled single-line text input.",
+      "tags": [
+        "input",
+        "text",
+        "form"
+      ],
+      "status": "candidate",
+      "target": {
+        "framework": "flask",
+        "language": "jinja",
+        "styling": "plain-css"
+      },
+      "source": {
+        "url": "https://github.com/hiraypawan/iimodel",
+        "revision": "arena/c056808c-iimodel",
+        "path": "blackboard/component_catalog/components/text_input.html.j2",
+        "content_sha256": "84da695d3660968c7fb9003a204786ed9547ceeb00c85ee84a2404c05c11ed4e"
+      },
+      "license": {
+        "spdx_id": "MIT",
+        "license_url": "https://github.com/hiraypawan/iimodel/blob/arena/c056808c-iimodel/LICENSE",
+        "review_status": "pending",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "notice_required": true
+      },
+      "dependencies": [],
+      "entrypoint": "blackboard/component_catalog/components/text_input.html.j2",
+      "export_name": "TextInput",
+      "props_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field_id",
+          "name",
+          "label"
+        ],
+        "properties": {
+          "field_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "placeholder": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        }
+      },
+      "slots": {},
+      "validation": {
+        "build": "not_run",
+        "unit_tests": "not_run",
+        "accessibility": "not_run",
+        "visual_review": "not_reviewed",
+        "notes": "Original II candidate; requires manual integration/review."
+      }
+    },
+    {
+      "id": "ui.input.password.v1",
+      "kind": "component",
+      "name": "PasswordInput",
+      "summary": "Labeled password input with a safe autocomplete default.",
+      "tags": [
+        "input",
+        "password",
+        "form"
+      ],
+      "status": "candidate",
+      "target": {
+        "framework": "flask",
+        "language": "jinja",
+        "styling": "plain-css"
+      },
+      "source": {
+        "url": "https://github.com/hiraypawan/iimodel",
+        "revision": "arena/c056808c-iimodel",
+        "path": "blackboard/component_catalog/components/password_input.html.j2",
+        "content_sha256": "fb127f01a5a57177bb92af32959481852d8afeee2fe3acda7e1b9b45e9b6cc6c"
+      },
+      "license": {
+        "spdx_id": "MIT",
+        "license_url": "https://github.com/hiraypawan/iimodel/blob/arena/c056808c-iimodel/LICENSE",
+        "review_status": "pending",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "notice_required": true
+      },
+      "dependencies": [],
+      "entrypoint": "blackboard/component_catalog/components/password_input.html.j2",
+      "export_name": "PasswordInput",
+      "props_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field_id",
+          "name",
+          "label"
+        ],
+        "properties": {
+          "field_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "autocomplete": {
+            "enum": [
+              "current-password",
+              "new-password"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          }
+        }
+      },
+      "slots": {},
+      "validation": {
+        "build": "not_run",
+        "unit_tests": "not_run",
+        "accessibility": "not_run",
+        "visual_review": "not_reviewed",
+        "notes": "Original II candidate; requires manual integration/review."
+      }
+    },
+    {
+      "id": "ui.card.basic.v1",
+      "kind": "component",
+      "name": "BasicCard",
+      "summary": "Semantic card with a heading and escaped body text.",
+      "tags": [
+        "card",
+        "content"
+      ],
+      "status": "candidate",
+      "target": {
+        "framework": "flask",
+        "language": "jinja",
+        "styling": "plain-css"
+      },
+      "source": {
+        "url": "https://github.com/hiraypawan/iimodel",
+        "revision": "arena/c056808c-iimodel",
+        "path": "blackboard/component_catalog/components/basic_card.html.j2",
+        "content_sha256": "198902096a63c2023b7a015308189c089c2809a113f4d1c05007f47cc065e83f"
+      },
+      "license": {
+        "spdx_id": "MIT",
+        "license_url": "https://github.com/hiraypawan/iimodel/blob/arena/c056808c-iimodel/LICENSE",
+        "review_status": "pending",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "notice_required": true
+      },
+      "dependencies": [],
+      "entrypoint": "blackboard/component_catalog/components/basic_card.html.j2",
+      "export_name": "BasicCard",
+      "props_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "heading_id",
+          "title",
+          "body"
+        ],
+        "properties": {
+          "heading_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          }
+        }
+      },
+      "slots": {
+        "body": "escaped text"
+      },
+      "validation": {
+        "build": "not_run",
+        "unit_tests": "not_run",
+        "accessibility": "not_run",
+        "visual_review": "not_reviewed",
+        "notes": "Original II candidate; requires manual integration/review."
+      }
+    },
+    {
+      "id": "ui.layout.centered.v1",
+      "kind": "component",
+      "name": "CenteredLayout",
+      "summary": "Centered main-content wrapper.",
+      "tags": [
+        "layout",
+        "centered"
+      ],
+      "status": "candidate",
+      "target": {
+        "framework": "flask",
+        "language": "jinja",
+        "styling": "plain-css"
+      },
+      "source": {
+        "url": "https://github.com/hiraypawan/iimodel",
+        "revision": "arena/c056808c-iimodel",
+        "path": "blackboard/component_catalog/components/centered_layout.html.j2",
+        "content_sha256": "076fdc72aca6606bc94fa4451436ceaf05e1f0464c899f7429a00993f83476a5"
+      },
+      "license": {
+        "spdx_id": "MIT",
+        "license_url": "https://github.com/hiraypawan/iimodel/blob/arena/c056808c-iimodel/LICENSE",
+        "review_status": "pending",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "notice_required": true
+      },
+      "dependencies": [],
+      "entrypoint": "blackboard/component_catalog/components/centered_layout.html.j2",
+      "export_name": "CenteredLayout",
+      "props_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "slots": {
+        "content": "escaped text"
+      },
+      "validation": {
+        "build": "not_run",
+        "unit_tests": "not_run",
+        "accessibility": "not_run",
+        "visual_review": "not_reviewed",
+        "notes": "Original II candidate; requires manual integration/review."
+      }
+    },
+    {
+      "id": "ui.auth.login-card.v1",
+      "kind": "component",
+      "name": "LoginCard",
+      "summary": "Login-form pattern; host application must add CSRF and server validation.",
+      "tags": [
+        "auth",
+        "login",
+        "form"
+      ],
+      "status": "candidate",
+      "target": {
+        "framework": "flask",
+        "language": "jinja",
+        "styling": "plain-css"
+      },
+      "source": {
+        "url": "https://github.com/hiraypawan/iimodel",
+        "revision": "arena/c056808c-iimodel",
+        "path": "blackboard/component_catalog/components/login_card.html.j2",
+        "content_sha256": "5712e3641ad94177ed56c65c7f800f4ecbfe6fda033061a52ecbbb3e392dc7e8"
+      },
+      "license": {
+        "spdx_id": "MIT",
+        "license_url": "https://github.com/hiraypawan/iimodel/blob/arena/c056808c-iimodel/LICENSE",
+        "review_status": "pending",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "notice_required": true
+      },
+      "dependencies": [],
+      "entrypoint": "blackboard/component_catalog/components/login_card.html.j2",
+      "export_name": "LoginCard",
+      "props_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "heading_id",
+          "email_id",
+          "password_id",
+          "form_action"
+        ],
+        "properties": {
+          "heading_id": {
+            "type": "string"
+          },
+          "email_id": {
+            "type": "string"
+          },
+          "password_id": {
+            "type": "string"
+          },
+          "form_action": {
+            "type": "string",
+            "pattern": "^/(?!/)"
+          },
+          "title": {
+            "type": "string"
+          },
+          "submit_label": {
+            "type": "string"
+          }
+        }
+      },
+      "slots": {},
+      "validation": {
+        "build": "not_run",
+        "unit_tests": "not_run",
+        "accessibility": "not_run",
+        "visual_review": "not_reviewed",
+        "notes": "Original II candidate; requires manual integration/review."
+      }
+    },
+    {
+      "id": "ui.navigation.sidebar.v1",
+      "kind": "component",
+      "name": "NavSidebar",
+      "summary": "Navigation sidebar with internal-path links.",
+      "tags": [
+        "navigation",
+        "sidebar"
+      ],
+      "status": "candidate",
+      "target": {
+        "framework": "flask",
+        "language": "jinja",
+        "styling": "plain-css"
+      },
+      "source": {
+        "url": "https://github.com/hiraypawan/iimodel",
+        "revision": "arena/c056808c-iimodel",
+        "path": "blackboard/component_catalog/components/nav_sidebar.html.j2",
+        "content_sha256": "7c76a2478f64267c4e59e5c09bc5c3a814dbf0dae0f7282b21856b5d0231ffc6"
+      },
+      "license": {
+        "spdx_id": "MIT",
+        "license_url": "https://github.com/hiraypawan/iimodel/blob/arena/c056808c-iimodel/LICENSE",
+        "review_status": "pending",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "notice_required": true
+      },
+      "dependencies": [],
+      "entrypoint": "blackboard/component_catalog/components/nav_sidebar.html.j2",
+      "export_name": "NavSidebar",
+      "props_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "links"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "href",
+                "label"
+              ],
+              "properties": {
+                "href": {
+                  "type": "string",
+                  "pattern": "^/(?!/)"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "current": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "slots": {},
+      "validation": {
+        "build": "not_run",
+        "unit_tests": "not_run",
+        "accessibility": "not_run",
+        "visual_review": "not_reviewed",
+        "notes": "Original II candidate; requires manual integration/review."
+      }
+    },
+    {
+      "id": "ui.table.data.v1",
+      "kind": "component",
+      "name": "DataTable",
+      "summary": "Accessible table with caption, header scopes, and empty state.",
+      "tags": [
+        "table",
+        "data"
+      ],
+      "status": "candidate",
+      "target": {
+        "framework": "flask",
+        "language": "jinja",
+        "styling": "plain-css"
+      },
+      "source": {
+        "url": "https://github.com/hiraypawan/iimodel",
+        "revision": "arena/c056808c-iimodel",
+        "path": "blackboard/component_catalog/components/data_table.html.j2",
+        "content_sha256": "ac3c88465776ec31c47a52957af207fce453b3953a4909e6aa4c8fabd7279366"
+      },
+      "license": {
+        "spdx_id": "MIT",
+        "license_url": "https://github.com/hiraypawan/iimodel/blob/arena/c056808c-iimodel/LICENSE",
+        "review_status": "pending",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "notice_required": true
+      },
+      "dependencies": [],
+      "entrypoint": "blackboard/component_catalog/components/data_table.html.j2",
+      "export_name": "DataTable",
+      "props_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "caption",
+          "columns",
+          "rows"
+        ],
+        "properties": {
+          "caption": {
+            "type": "string"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "key",
+                "label"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "empty_label": {
+            "type": "string"
+          }
+        }
+      },
+      "slots": {},
+      "validation": {
+        "build": "not_run",
+        "unit_tests": "not_run",
+        "accessibility": "not_run",
+        "visual_review": "not_reviewed",
+        "notes": "Original II candidate; requires manual integration/review."
+      }
+    },
+    {
+      "id": "ui.dialog.modal.v1",
+      "kind": "component",
+      "name": "ModalDialog",
+      "summary": "Native HTML dialog template; focus management and opening behavior need host code.",
+      "tags": [
+        "dialog",
+        "modal"
+      ],
+      "status": "candidate",
+      "target": {
+        "framework": "flask",
+        "language": "jinja",
+        "styling": "plain-css"
+      },
+      "source": {
+        "url": "https://github.com/hiraypawan/iimodel",
+        "revision": "arena/c056808c-iimodel",
+        "path": "blackboard/component_catalog/components/modal_dialog.html.j2",
+        "content_sha256": "e6967b3de38a552819bca0e49348ad2a7531a18ba7c203abdfc532e2193141be"
+      },
+      "license": {
+        "spdx_id": "MIT",
+        "license_url": "https://github.com/hiraypawan/iimodel/blob/arena/c056808c-iimodel/LICENSE",
+        "review_status": "pending",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "notice_required": true
+      },
+      "dependencies": [],
+      "entrypoint": "blackboard/component_catalog/components/modal_dialog.html.j2",
+      "export_name": "ModalDialog",
+      "props_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "dialog_id",
+          "heading_id",
+          "title",
+          "body"
+        ],
+        "properties": {
+          "dialog_id": {
+            "type": "string"
+          },
+          "heading_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "close_label": {
+            "type": "string"
+          },
+          "open": {
+            "type": "boolean"
+          }
+        }
+      },
+      "slots": {
+        "body": "escaped text"
+      },
+      "validation": {
+        "build": "not_run",
+        "unit_tests": "not_run",
+        "accessibility": "not_run",
+        "visual_review": "not_reviewed",
+        "notes": "Original II candidate; requires manual integration/review."
+      }
+    }
+  ]
+}

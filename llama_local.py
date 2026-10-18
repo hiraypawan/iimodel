@@ -1,12 +1,8 @@
 """
-llama_local.py — Local model backend (NO Ollama required)
+Backend adapter for an optional local language model.
 
-Backend priority:
-1. llama-cpp-python — loads GGUF directly
-2. LM Studio — http://127.0.0.1:1234 (OpenAI-compatible API, auto-fallback)
-3. DummyModel — pure-Python fallback (deterministic tools only)
-
-v12: Auto LM Studio fallback eliminates Windows C++ Build Tools dependency.
+Priority: llama-cpp-python with a present GGUF file, then an LM Studio server,
+then a clearly non-generative demo placeholder. No model weights are bundled.
 """
 
 from __future__ import annotations
@@ -50,7 +46,15 @@ class LMStudioModel:
             return False
         try:
             resp = requests.get(f"{self.base_url}/v1/models", timeout=5)
-            return resp.status_code == 200
+            if resp.status_code != 200:
+                return False
+            models = resp.json().get("data", [])
+            if not models:
+                return False
+            # LM Studio expects the ID returned by /v1/models, not a made-up name.
+            if self.model_name == "local-model":
+                self.model_name = models[0].get("id") or self.model_name
+            return True
         except Exception:
             return False
 
@@ -94,8 +98,8 @@ class LMStudioModel:
 
 class DummyModel:
     """
-    Pure-Python fallback LLM. Used only when llama-cpp-python AND LM Studio
-    are both unavailable. Demonstrates full ReAct architecture.
+    Non-generative placeholder used when no model backend is available. It is
+    for interface/testing behavior only and does not provide AI responses.
     """
 
     def __init__(
@@ -138,16 +142,21 @@ class DummyModel:
             max_tokens=max_tokens,
         ).get("content", "")
 
+    @property
+    def mode(self) -> str:
+        return self._mode
+
 
 class LocalModel:
     """
     Local model backend with automatic backend selection:
 
-    1. llama-cpp-python — loads your .gguf file directly
-    2. LM Studio — connects to http://127.0.0.1:1234 (no compiler needed)
-    3. DummyModel — pure Python fallback (demonstrates full ReAct architecture)
+    1. llama-cpp-python — loads a present GGUF file directly
+    2. LM Studio — connects to http://127.0.0.1:1234
+    3. DummyModel — non-generative demo placeholder
 
-    v12: Automatically falls back to LM Studio if llama-cpp-python is missing.
+    The backend mode is exposed so the UI can distinguish demo responses from
+    model-generated chat.
     """
 
     def __init__(

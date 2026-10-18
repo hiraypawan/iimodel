@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "II Component Selection Spec",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "target_id", "layout_id", "theme", "regions"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "target_id": { "type": "string", "minLength": 1 },
+    "layout_id": { "type": "string", "minLength": 1 },
+    "theme": { "enum": ["light", "dark", "system"] },
+    "regions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["region_id", "component_id", "props"],
+        "properties": {
+          "region_id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+          "component_id": { "type": "string", "minLength": 1 },
+          "props": { "type": "object" }
+        }
+      }
+    }
+  }
+}

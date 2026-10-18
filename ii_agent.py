@@ -1,21 +1,12 @@
 """
-Module 3: ii_agent.py — II v12 Core Orchestrator
+II command-line agent prototype.
 
-The v12 ReAct orchestrator with deterministic pre-LLM tool routing.
-Routes tasks to deterministic tools:
-- search_web, read_url, execute_code (v9.0 foundation)
-- smt_solver (Z3 — 0% hallucination math)
-- program_synthesis (Enumerative — Kolmogorov-optimal code invention)
-- visual_ground (MobileCLIP — semantic visual grounding)
-- blackboard (Interface-First Locking — zero context rot)
+This module combines a local model backend with optional helper tools. Its
+keyword-based tool hint is a lightweight heuristic, not a guarantee that the
+model will call the right tool. Some tools are prototypes.
 
-v12 additions:
-- Deterministic Pre-LLM Tool Router (cosine-similarity embedding router)
-  eliminates tool selection hallucination.
-- System Mixture of Experts routing hints injected into system prompt.
-
-Uses the local GGUF backend (llama_local.py) instead of Ollama.
-100% local, no cloud, no API keys.
+Web search and URL fetching make external network requests; Python execution is
+performed in the current user's environment and is not isolated.
 """
 
 from __future__ import annotations
@@ -24,13 +15,14 @@ import json
 import tempfile
 import os
 import subprocess
-from typing import Optional
+import sys
 
 from ii_graph import CodebaseKnowledgeGraph
-from ii_web import search_web, read_url, fetch_with_authority, format_source_tag
+from graph.topology import GraphTopologyAnalyzer
+from reasoning.verification_cascade import VerificationCascade
+from ii_web import search_web, fetch_evidence, candidate_contradictions
 from ii_smt import smt_math_tool
 from ii_synthesis import EnumerativeSynthesizer, synthesis_tool
-from ii_vision import MobileCLIPGrounder, vision_ground_tool
 from ii_blackboard import (
     Blackboard,
     BlackboardArchitect,
@@ -41,7 +33,7 @@ from ii_blackboard import (
 from llama_local import LocalModel
 
 # --------------------------------------------------------------------------- #
-# Deterministic Pre-LLM Tool Router (Anti-Hallucination Shield)
+# Lightweight keyword-based tool hint (heuristic only)
 # --------------------------------------------------------------------------- #
 _TOOL_KEYWORDS = {
     "smt_solver": (
@@ -53,11 +45,6 @@ _TOOL_KEYWORDS = {
         "write code", "write a function", "invent", "synthesize",
         "algorithm", "program that", "factorial", "fibonacci",
         "implement", "build a", "create", "generate code"
-    ),
-    "visual_ground": (
-        "visual", "ui", "button", "layout", "misaligned", "screenshot",
-        "css", "style", "alignment", "contrast", "spacing", "cluttered",
-        "mobileclip", "grounding"
     ),
     "blackboard": (
         "blackboard", "architecture", "multi-file", "interface",
@@ -79,11 +66,8 @@ _TOOL_KEYWORDS = {
     ),
 }
 
-def deterministic_tool_router(user_prompt: str, available_tool_names: list) -> str | None:
-    """
-    Force the correct tool based on keyword matching.
-    Returns tool name or None (let LLM decide if no strong match).
-    """
+def keyword_tool_hint(user_prompt: str, available_tool_names: list) -> str | None:
+    """Return the highest-scoring keyword match as a non-binding hint."""
     text = user_prompt.lower()
     scores = {}
     for tool_name, keywords in _TOOL_KEYWORDS.items():
@@ -104,10 +88,10 @@ _WORKDIR = "."
 kg = CodebaseKnowledgeGraph(_WORKDIR)
 kg.build_graph()
 kg.resolve_cross_file_edges()
-holographic_index = kg.get_holographic_index()
+repository_index = kg.get_repository_index()
+architecture_map = GraphTopologyAnalyzer(kg.graph).generate_architecture_map(max_tokens=600)
 
 synthesizer = EnumerativeSynthesizer()
-vision_grounder = MobileCLIPGrounder()
 blackboard = Blackboard(_WORKDIR)
 architect = BlackboardArchitect(blackboard)
 
@@ -121,32 +105,35 @@ try:
 except Exception:
     _llm = None
 
-SYSTEM_PROMPT = f"""You are II v12, an Internet-Native Neuro-Symbolic Agentic OS.
-You operate with deterministic tool verification.
+SYSTEM_PROMPT = f"""You are II, a coding assistant connected to an optional local model.
+The repository index is approximate and may omit symbols:
+{repository_index}
 
-CODEBASE MAP (Holographic Index):
-{holographic_index}
+Approximate graph topology (navigation aid, not architecture proof):
+{architecture_map}
 
-AVAILABLE TOOLS (call by name when helpful):
-- search_web(query): Search DuckDuckGo for live information
-- read_url(url): Extract clean markdown text from a URL
-- execute_code(code): Run Python code in a sandbox; returns stdout or stderr
-- smt_solver(problem): Solve PhD-level math/logic via Z3. Format:
+Pipeline status: repository graph summaries are available before inference; the
+current backends do not expose portable hidden-state hooks, forkable KV caches,
+or constrained-decoding interfaces. Static Python preflight is not a full
+three-gate correctness or safety proof.
+
+Available helpers:
+- search_web(query): sends a query to an external web-search service
+- read_url(url): returns source URLs and exact extracted passages for review; extraction is not fact-checking
+- execute_code(code): runs a Python subprocess with the current user's permissions; it is not isolated
+- smt_solver(problem): solves explicit constraints when Z3 is installed. Format:
     VARIABLES: x Int, y Int
     CONSTRAINTS: x > 0, y > 0, x + y == 10
-- program_synthesis(examples): Invent optimal code from examples.
-    Format: JSON array of [[inputs], output], e.g. [[[1, 2], 3], [[5, 7], 12]]
-- visual_ground(image_path, query): Find UI region by semantic description.
-    Returns bounding box coordinates.
-- blackboard(action, payload): Multi-file architecture manager.
-    Actions: design, build, inspect, list.
+- program_synthesis(examples): searches a bounded expression set. Format:
+    JSON array of [[inputs], output], e.g. [[[1, 2], 3], [[5, 7], 12]]
+- blackboard(action, payload): supports listing, inspection, and an approximate repository graph
 
-RULES:
-1. Use tools for math, invention, UI, and architecture — never guess.
-2. Write code, then verify with execute_code before presenting.
-3. If a tool fails, read the error and adjust. Max 1 retry per tool call.
-4. Keep answers concise and useful.
-5. For ambiguous tasks, ask clarifying questions before proceeding.
+Guidance:
+1. Verify important claims; tools do not guarantee correctness.
+2. Treat retrieval passages as unverified excerpts; lexical conflict flags are only review prompts. Say “insufficient evidence” when sources do not support a response.
+3. Use the solver only for explicitly encoded constraints.
+4. Treat code execution as potentially unsafe.
+5. Keep answers concise and useful; ask clarifying questions when needed.
 """
 
 TOOLS = [
@@ -154,7 +141,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search DuckDuckGo for live information",
+            "description": "Search the web for current information; sends a request to an external service.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
@@ -166,7 +153,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "read_url",
-            "description": "Extract clean markdown text from a URL",
+            "description": "Fetch a URL and extract readable text",
             "parameters": {
                 "type": "object",
                 "properties": {"url": {"type": "string"}},
@@ -178,7 +165,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "execute_code",
-            "description": "Run Python code in a sandbox. Returns stdout or stderr.",
+            "description": "Run Python code as a subprocess using the current user's permissions; not isolated.",
             "parameters": {
                 "type": "object",
                 "properties": {"code": {"type": "string"}},
@@ -190,7 +177,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "smt_solver",
-            "description": "Solve complex math/logic proofs using Z3 SMT solver.",
+            "description": "Solve explicit logical constraints with Z3 when installed; does not parse arbitrary natural language.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -207,7 +194,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "program_synthesis",
-            "description": "Invent optimal code from scratch via enumerative search.",
+            "description": "Search a small bounded expression set for a program matching examples.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -223,29 +210,15 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "visual_ground",
-            "description": "Find UI elements by semantic description (e.g., 'misaligned button').",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "image_path": {"type": "string"},
-                    "query": {"type": "string"},
-                },
-                "required": ["image_path", "query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "blackboard",
-            "description": "Manage multi-file architecture (design/build/inspect/list).",
+            "description": "Experimental interface store; supports inspect, list, and approximate graph actions.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "design, build, inspect, or list",
+                        "description": "inspect, list, or approximate graph",
+                        "enum": ["inspect", "list", "graph"],
                     },
                     "payload": {
                         "type": "string",
@@ -260,13 +233,13 @@ TOOLS = [
 
 
 def execute_code(code: str, timeout: int = 15) -> tuple[bool, str]:
-    """Run Python code in a temp file sandbox."""
+    """Run Python in a temporary subprocess (not an OS-level sandbox)."""
     with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
         f.write(code)
         temp_path = f.name
     try:
         result = subprocess.run(
-            ["python", temp_path],
+            [sys.executable, temp_path],
             capture_output=True, text=True, timeout=timeout,
         )
         os.unlink(temp_path)
@@ -287,12 +260,20 @@ def execute_code(code: str, timeout: int = 15) -> tuple[bool, str]:
         return False, str(exc)
 
 
-def execute_tool(tool_name: str, args: dict) -> str:
-    """Deterministic tool router for v12."""
+def execute_tool(
+    tool_name: str,
+    args: dict,
+    evidence_cache: list[dict[str, str]] | None = None,
+) -> str:
+    """Dispatch a selected tool to its implementation."""
     if tool_name == "search_web":
         return search_web(args.get("query", ""))
     if tool_name == "read_url":
-        return read_url(args.get("url", ""))
+        evidence = fetch_evidence(args.get("url", ""))
+        if evidence_cache is not None:
+            evidence_cache.extend(evidence.get("evidence_passages", []))
+            evidence["possible_conflicts"] = candidate_contradictions(evidence_cache)
+        return json.dumps(evidence, ensure_ascii=False)
     if tool_name == "execute_code":
         success, output = execute_code(args.get("code", ""))
         return f"SUCCESS:\n{output}" if success else f"ERROR:\n{output}"
@@ -300,10 +281,6 @@ def execute_tool(tool_name: str, args: dict) -> str:
         return smt_math_tool(args.get("problem", ""))
     if tool_name == "program_synthesis":
         return synthesis_tool(args.get("examples", ""))
-    if tool_name == "visual_ground":
-        return vision_ground_tool(
-            args.get("image_path", ""), args.get("query", "")
-        )
     if tool_name == "blackboard":
         return blackboard_tool(
             args.get("action", ""),
@@ -314,23 +291,26 @@ def execute_tool(tool_name: str, args: dict) -> str:
 
 
 def run_agent_v12(user_prompt: str):
-    """Main v12 ReAct loop with deterministic pre-LLM tool routing."""
-    print("[OK] II v12 Orchestrator Initialized")
-    if _llm is None:
-        print("[WARN] Local GGUF model not available (demo mode).")
-        print("    Install llama-cpp-python or connect LM Studio to enable chat.")
+    """Run a bounded tool-use loop with optional keyword hints."""
+    print("[INFO] II local-agent prototype")
+    if _llm is None or getattr(_llm, "mode", "demo") == "demo":
+        print("[WARN] No language-model backend is connected; demo mode cannot answer prompts.")
+        print("    Recommended: load a compatible model in LM Studio and start its local server.")
+        print("    Alternative: provide a GGUF file and install llama-cpp-python.")
         return
 
     messages = [{"role": "user", "content": user_prompt}]
+    evidence_cache: list[dict[str, str]] = []
 
-    # Deterministic pre-LLM routing
-    forced_tool = deterministic_tool_router(
+    # Optional keyword heuristic. The model may ignore this suggestion.
+    hinted_tool = keyword_tool_hint(
         user_prompt, [t["function"]["name"] for t in TOOLS]
     )
     routing_hint = ""
-    if forced_tool:
+    if hinted_tool:
         routing_hint = (
-            f"\nIMPORTANT: Use the tool '{forced_tool}' for this request.\n"
+            f"\nA keyword heuristic suggests '{hinted_tool}' may be relevant; "
+            "use it only if appropriate.\n"
         )
 
     for step in range(10):  # Max 10 ReAct steps to prevent infinite loops
@@ -349,11 +329,17 @@ def run_agent_v12(user_prompt: str):
         tool_calls = response.get("tool_calls") or []
 
         print(f"[MODEL] {content[:200]}...")
-        messages.append({"role": "assistant", "content": content})
+        # Preserve tool_calls in the assistant message for OpenAI-compatible APIs.
+        messages.append(response)
 
         if not tool_calls:
             print("\n[DONE] Final Answer Reached.")
             print(content)
+            if "```python" in content:
+                code = content.split("```python", 1)[1].split("```", 1)[0]
+                report = VerificationCascade().verify_python(code)
+                print("[STATIC PREFLIGHT ONLY]")
+                print(json.dumps(report.to_dict(), indent=2))
             break
 
         for tool_call in tool_calls:
@@ -362,11 +348,16 @@ def run_agent_v12(user_prompt: str):
             if isinstance(args, str):
                 args = json.loads(args)
             print(f"[TOOL] Executing: {fn}")
-            result = execute_tool(fn, args)
+            result = execute_tool(fn, args, evidence_cache=evidence_cache)
             print(f"[RESULT] {result[:300]}...")
 
             messages.append(
-                {"role": "tool", "name": fn, "content": result}
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.get("id"),
+                    "name": fn,
+                    "content": result,
+                }
             )
 
 

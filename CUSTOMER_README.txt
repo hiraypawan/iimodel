@@ -1,84 +1,78 @@
-================================================================================
-II v11 — Internet Intelligence (Neuro-Symbolic Agentic OS)
-================================================================================
+II — LOCAL TOOL-AUGMENTED AGENT PROTOTYPE
+==========================================
 
 WHAT THIS IS
---------------------------------------------------------------------------------
-A 100% local, $0-cost, private AI agent that runs on a 1.5B parameter model
-(qwen2.5-1.5b-instruct-q4_0.gguf) plus deterministic system tools:
+------------
+II is a Python application that connects an optional local language model to a
+Flask chat UI and experimental helper tools. It is an orchestration prototype,
+not a new AI model. The repository does not include model weights.
 
-  • Z3 SMT Solver          — 100% verified PhD-level math (0% hallucination)
-  • Program Synthesis      — Kolmogorov-optimal code invention from examples
-  • MobileCLIP Vision      — Semantic UI grounding (finds broken/misaligned UI)
-  • Blackboard Pattern     — Multi-file architecture with 0% context rot
-  • Codebase Knowledge Graph — Holographic repo index for surgical editing
-  • Web Search + Fetch     — Live internet as memory (DuckDuckGo + Trafilatura)
-  • Constraint Sharding    — Perfect rule adherence for code generation
+The default example model is Qwen2.5-1.5B-Instruct in GGUF format. You can use
+LM Studio as the recommended local backend, or install llama-cpp-python and
+provide the GGUF file yourself.
 
-WHAT YOU GET
---------------------------------------------------------------------------------
-• No cloud, no API keys, no Ollama, no subscriptions
-• Runs entirely offline on your own machine
-• ~1GB RAM footprint
-• Browser chat UI at http://127.0.0.1:5000/
+RECOMMENDED SETUP: LM STUDIO
+----------------------------
+1. Install LM Studio and load a compatible Qwen2.5-1.5B-Instruct GGUF model.
+2. Start its OpenAI-compatible local server at http://127.0.0.1:1234.
+3. Install Python 3.11 (the Windows launcher targets Python 3.11).
+4. In this folder, run:
 
-HOW TO RUN (Windows)
---------------------------------------------------------------------------------
-1. Extract this folder anywhere.
-2. Double-click: INSTALL_AND_RUN.bat
-   (or run: python bootstrap.py)
-3. Wait for dependencies to install (first time only).
-4. Open your browser to: http://127.0.0.1:5000/
-5. Start chatting with II v11.
+     py -3.11 -m venv .venv
+     .venv\Scripts\activate
+     python -m pip install --upgrade pip
+     pip install -r requirements.txt
+     python app.py
 
-LLAMA-CPP-PYTHON INSTALLATION (CRITICAL)
---------------------------------------------------------------------------------
-The real GGUF model requires llama-cpp-python. On Windows, pip sometimes tries
-to compile it from source, which fails without Visual Studio C++ Build Tools.
+5. Open http://127.0.0.1:5000/.
 
-FIX (2 minutes, recommended):
-1. Install Python 3.11 from: https://www.python.org/downloads/release/python-3119/
-2. During installation, CHECK "Add Python to PATH"
-3. Delete the existing venv folder in this directory
-4. Re-run INSTALL_AND_RUN.bat
+The server status is shown in the page header and at GET /api/status. If no
+model backend is connected, the app starts in demo mode. Demo mode does not
+produce AI answers; it displays instructions for connecting a backend.
 
-This works because llama-cpp-python publishes pre-built wheels for Python 3.11.
+WINDOWS LAUNCHER
+----------------
+Double-click start.bat to create a virtual environment, install dependencies,
+and start the server. It does not download model weights. INSTALL_AND_RUN.bat
+and setup_ii.bat call the same launcher.
 
-ALTERNATIVE: Use LM Studio
---------------------------------------------------------------------------------
-1. Install LM Studio from https://lmstudio.ai/
-2. Load your GGUF model and start Local Server at http://127.0.0.1:1234
-3. Run INSTALL_AND_RUN.bat (let step 7 fail, continue in demo mode)
-4. II v11 will connect to LM Studio automatically for real model chat
+OPTIONAL: DOWNLOAD GGUF FOR DIRECT LOCAL INFERENCE
+--------------------------------------------------
+Model repository:
+https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF
 
-FIRST-RUN NOTE
---------------------------------------------------------------------------------
-The first launch installs llama-cpp-python and all dependencies. This takes
-2–5 minutes depending on your internet speed. Subsequent launches are instant.
+Direct Q4_0 file:
+https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_0.gguf?download=true
 
-SYSTEM REQUIREMENTS
---------------------------------------------------------------------------------
-• Windows 10/11
-• Python 3.11 recommended (3.10 also works)
-• 8 GB RAM recommended
-• 2 GB free disk space (model ~986 MB)
+Save the file as:
+models\qwen2.5-1.5b-instruct-q4_0.gguf
 
-MODEL FILE
---------------------------------------------------------------------------------
-The file models/qwen2.5-1.5b-instruct-q4_0.gguf (~986 MB) must be present.
-If missing, the launcher will tell you before starting.
+Then install llama-cpp-python in the same Python environment:
 
-OPTIONAL EXTRAS
---------------------------------------------------------------------------------
-For full God-Tier capability, optionally install:
-  pip install z3-solver torch transformers Pillow mypy
-The system still works without them (graceful fallbacks).
+     python -m pip install llama-cpp-python
 
-LICENSE / DISTRIBUTION
---------------------------------------------------------------------------------
-You may redistribute this package as-is. The model file and code are included.
-Do not remove the model file or the INSTALL_AND_RUN.bat launcher.
+The model file is large and is excluded from Git. Check the model repository for
+its license and usage terms.
 
-================================================================================
-END
-================================================================================
+CURRENT LIMITATIONS
+-------------------
+- The repository index is a basic symbol/import/call index, not semantic or data-flow search; graph summaries are approximate navigation hints. A synthetic cycle fixture tests detection but is not an AI benchmark.
+- Repository ingestion accepts public GitHub URLs via CLI/API, uses a blocking local clone, and checks a supported root license set. Cloned code is parsed, not executed; cloning is not sandboxed and the API is unauthenticated.
+- The static verification endpoint does not run code or prove correctness.
+- Z3 solving requires a separate install and explicit formal constraints; it
+  does not translate natural-language math into formulas.
+- Example synthesis is limited to a small expression set.
+- Steering/probe tools ship no model-specific vectors, and KV paging is metadata-only; current backends do not expose the required hooks/cache APIs.
+- The component catalog contains ten original Flask/Jinja candidates, all unapproved. No renderer/build pipeline is implemented.
+- Web search and URL fetching contact external services and require internet.
+- Code execution is not sandboxed and runs with the current user's permissions.
+- Vision localization is not implemented. Blackboard can return an approximate dependency graph; design/build automation is not a supported end-to-end feature.
+- No comparative AI benchmark results are published.
+
+PRIVACY AND SAFETY
+------------------
+Inference through LM Studio or llama-cpp-python can stay on the local machine.
+Web search and URL fetching make external requests. Do not expose the development
+server or code-execution features to untrusted users.
+
+The project code is MIT-licensed; see LICENSE. Model weights have separate terms.

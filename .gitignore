@@ -1,5 +1,5 @@
 # =============================================================================
-# .gitignore — II v12 Internet Intelligence
+# .gitignore — II local-agent prototype
 # =============================================================================
 
 # --- Large binaries (DO NOT COMMIT) ---
@@ -25,6 +25,8 @@ pip-delete-this-directory.txt
 .ii_state/
 .blackboard.json
 dist/
+.cache/repos/
+tests/benchmarks/results/
 *.egg-info/
 .installed.cfg
 *.egg

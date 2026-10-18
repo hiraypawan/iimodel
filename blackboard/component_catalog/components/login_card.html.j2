@@ -1,0 +1,11 @@
+<section class="ii-login-card" aria-labelledby="{{ heading_id|e }}">
+  <h1 id="{{ heading_id|e }}">{{ title|default('Sign in')|e }}</h1>
+  <form method="post" action="{{ form_action|e }}">
+    <label for="{{ email_id|e }}">Email</label>
+    <input id="{{ email_id|e }}" name="email" type="email" autocomplete="email" required>
+    <label for="{{ password_id|e }}">Password</label>
+    <input id="{{ password_id|e }}" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">{{ submit_label|default('Continue')|e }}</button>
+  </form>
+  <p class="ii-login-card__security-note">Connect this form to an application with CSRF protection and server-side validation.</p>
+</section>

@@ -37,6 +37,9 @@
   .dot { width: 8px; height: 8px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px var(--accent); }
   h1 { font-size: 15px; letter-spacing: 0.5px; font-weight: 600; color: var(--accent); }
   .sub { font-size: 11px; color: var(--muted); margin-left: 6px; }
+  #backendStatus { margin-left: auto; font-size: 11px; color: var(--muted); }
+  #backendStatus.ready { color: var(--accent); }
+  #backendStatus.demo { color: #ffcc66; }
 
   main { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
   .msg { max-width: 720px; display: flex; flex-direction: column; gap: 6px; }
@@ -134,15 +137,16 @@
 <body>
 <header>
   <div class="dot"></div>
-  <h1>II<span class="sub">·Local Agent · models/qwen2.5-1.5b-instruct-q4_0.gguf · No cloud</span></h1>
+  <h1>II<span class="sub">Local tool-augmented agent prototype</span></h1>
+  <span id="backendStatus" class="demo">Checking model backend…</span>
 </header>
 
 <main id="chat">
-  <div class="empty-state" id="empty">Say something to II. It can search the web, run Python, and inspect this codebase.</div>
+  <div class="empty-state" id="empty">Checking model status. Search and URL fetch use the internet; code execution runs locally and is not sandboxed.</div>
 </main>
 
 <footer>
-  <input type="text" id="input" placeholder="Ask II to build, fix, search, or run code..." autocomplete="off">
+  <input type="text" id="input" placeholder="Ask a question, request code, or ask to search..." autocomplete="off">
   <button class="send" id="send">Send</button>
 </footer>
 
@@ -151,6 +155,24 @@ const chat = document.getElementById('chat');
 const input = document.getElementById('input');
 const send = document.getElementById('send');
 const empty = document.getElementById('empty');
+const backendStatus = document.getElementById('backendStatus');
+
+fetch('/api/status').then(r => r.json()).then(status => {
+  if (status.chat_ready) {
+    backendStatus.textContent = `Model backend: ${status.backend}`;
+    backendStatus.className = 'ready';
+    empty.textContent = 'A local model backend is connected. Search and URL fetch use the internet; code execution runs with the current user’s permissions and is not sandboxed.';
+  } else {
+    backendStatus.textContent = 'Demo mode — no model connected';
+    backendStatus.title = status.setup_message || 'Connect a model backend.';
+    backendStatus.className = 'demo';
+    empty.textContent = 'Chat is in demo mode and cannot generate AI answers. Connect LM Studio or provide a GGUF model. Search and URL fetch use the internet; code execution runs locally and is not sandboxed.';
+  }
+}).catch(() => {
+  backendStatus.textContent = 'Backend status unavailable';
+  backendStatus.className = 'demo';
+  empty.textContent = 'Model status could not be checked. Connect a local model backend before expecting AI-generated answers.';
+});
 
 function scrollBottom(){ chat.scrollTop = chat.scrollHeight; }
 

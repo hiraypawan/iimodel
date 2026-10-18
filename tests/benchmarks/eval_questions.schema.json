@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "II Evaluation Tasks",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "question", "category", "answerable", "gold_sources", "reference_claims"],
+      "properties": {
+      "id": { "type": "string", "minLength": 1 },
+      "question": { "type": "string", "minLength": 1 },
+      "category": { "type": "string", "minLength": 1 },
+      "answerable": { "type": "boolean" },
+      "gold_sources": {
+        "type": "array",
+        "items": { "type": "string", "format": "uri" },
+        "uniqueItems": true
+      },
+      "reference_claims": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      },
+      "reference_answer": { "type": ["string", "null"] },
+      "ground_truth": { "type": ["string", "null"] },
+      "difficulty": { "enum": ["easy", "medium", "hard", "unspecified"] },
+      "notes": { "type": "string" }
+    },
+    "allOf": [
+      {
+        "if": { "properties": { "answerable": { "const": true } } },
+        "then": { "properties": { "gold_sources": { "minItems": 1 } } }
+      }
+    ]
+  }
+}
