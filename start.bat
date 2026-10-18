@@ -2,30 +2,29 @@
 cd /d "%~dp0"
 echo.
 echo ========================================
-echo   II v12 - Local AI Agent (Complete)
+echo   II v2.0 - Local Tool-Augmented Agent
 echo ========================================
 echo.
-echo Model: models/qwen2.5-1.5b-instruct-q4_0.gguf
 echo Server: http://127.0.0.1:5000
 echo.
 
-:: Check if venv exists
 if not exist ".venv\Scripts\python.exe" (
-    echo ERROR: Virtual environment not found.
-    echo Please extract the full package - .venv folder is required.
+    echo ERROR: Virtual environment not found at .venv\
+    echo Create it first:
+    echo   py -3.11 -m venv .venv
+    echo   .venv\Scripts\python.exe -m pip install -r requirements.txt
+    echo Or run INSTALL_AND_RUN.bat, or: python bootstrap.py
     pause
     exit /b 1
 )
 
-:: Check if model exists
 if not exist "models\qwen2.5-1.5b-instruct-q4_0.gguf" (
-    echo ERROR: Model file missing: models\qwen2.5-1.5b-instruct-q4_0.gguf
-    echo Place the GGUF model in the models/ folder first.
-    pause
-    exit /b 1
+    echo [INFO] No GGUF model in models\ - the app will use LM Studio if
+    echo        running, otherwise agentic/demo mode. See README.md.
+    echo.
 )
 
-echo Starting II v12 server...
+echo Starting II v2.0 server...
 echo.
 .venv\Scripts\python.exe app.py
 echo.

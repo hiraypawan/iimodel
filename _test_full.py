@@ -49,11 +49,15 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn("huggingface.co/Qwen/", body["setup_message"])
 
     def test_chat_reports_demo_instead_of_faking_model_output(self):
-        response = self.client.post("/api/chat", json={"message": "hello"})
+        # II_PRIVATE makes this deterministic and offline: with no model
+        # backend, chat must report demo mode rather than invent an answer
+        # or silently fall back to web search.
+        with patch.dict("os.environ", {"II_PRIVATE": "1"}):
+            response = self.client.post("/api/chat", json={"message": "hello"})
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
         self.assertTrue(body["demo"])
-        self.assertIn("cannot answer prompts with an AI model", body["response"])
+        self.assertIn("no local model backend is available", body["response"])
         self.assertIn("LM Studio", body["response"])
 
     def test_empty_chat_is_rejected(self):

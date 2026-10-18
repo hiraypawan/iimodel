@@ -68,15 +68,16 @@ modules remain the source of truth; `core/`, `tools/`, `server/`, `cli/`, and
 ## Trust and resource boundaries
 
 - Model output, JSON, retrieved web text, and cached graphs are untrusted input.
-- `execute_code` and optional validators run with the current OS user's
-  permissions unless an external caller provides real isolation. A subprocess
-  is not a sandbox.
+- `execute_code` defaults to a resource-limited subprocess running with
+  the current OS user's permissions (`II_CODE_SANDBOX=docker` provides
+  fail-closed Docker isolation; see `SECURITY.md`). A subprocess is not a
+  sandbox. `II_PRIVATE=1` disables all network tools.
 - License classification is heuristic and is not legal advice.
 - The Flask development server has no authentication and should remain on a
   trusted local machine.
 - No under-2-GB memory guarantee is made. Peak memory depends on model file,
   quantization, context, backend, and platform; it has not been measured.
 
-See [`LIMITATIONS.md`](LIMITATIONS.md) and [`VENDOR_CREDITS.md`](VENDOR_CREDITS.md)
+See the Limitations section of the root [`README.md`](../README.md), [`SECURITY.md`](SECURITY.md), and [`VENDOR_CREDITS.md`](VENDOR_CREDITS.md)
 for scope, caveats, and licensing references.
 

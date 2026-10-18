@@ -74,10 +74,10 @@ def main():
     args = parser.parse_args()
 
     if args.command == "chat":
-        from ii_agent import run_agent_v12
+        from ii_agent import run_agent
 
         prompt = args.input or input("Enter prompt: ")
-        run_agent_v12(prompt)
+        run_agent(prompt)
 
     elif args.command == "graph":
         print("[MAP] Building repository symbol index...")
@@ -228,7 +228,7 @@ def main():
         from ingestion.repo_ingestor import RepoIngestor
         try:
             print(RepoIngestor().ingest(args.repo))
-        except (ValueError, RuntimeError, FileExistsError) as exc:
+        except (ValueError, RuntimeError, FileExistsError, PermissionError) as exc:
             print(f"[INGEST FAILED] {exc}")
             raise SystemExit(1)
 

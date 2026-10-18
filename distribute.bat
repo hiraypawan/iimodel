@@ -15,8 +15,8 @@ for %%F in (*.py) do copy /y "%%F" "%DISTROOT%\%PACKAGE%\" >nul
 if errorlevel 1 goto error_exit
 
 copy /y README.md "%DISTROOT%\%PACKAGE%\" >nul
-copy /y CUSTOMER_README.txt "%DISTROOT%\%PACKAGE%\" >nul
 copy /y requirements.txt "%DISTROOT%\%PACKAGE%\" >nul
+copy /y requirements-core.txt "%DISTROOT%\%PACKAGE%\" >nul
 copy /y requirements-optional.txt "%DISTROOT%\%PACKAGE%\" >nul
 copy /y requirements-dev.txt "%DISTROOT%\%PACKAGE%\" >nul
 copy /y LICENSE "%DISTROOT%\%PACKAGE%\" >nul

@@ -1,42 +1,4 @@
-# ===================================================================
-# II v12 — Dependencies (Complete Bundle)
-# ===================================================================
-# All packages below are pre-installed in .venv/ when you download
-# the full distribution package. No separate installation needed.
-
-# --- Core dependencies ---
-flask>=3.0.0
-flask-cors>=4.0.0
-networkx>=3.1
-duckduckgo-search>=4.1.0
-trafilatura>=1.6.0
-playwright>=1.40.0
-requests>=2.31.0
-
-# --- Cross-language codebase graph (v12) ---
-tree-sitter>=0.24.0
-tree-sitter-python>=0.24.0
-tree-sitter-javascript>=0.24.0
-tree-sitter-typescript>=0.24.0
-
-# --- Real model backend (llama-cpp-python) ---
-# Pre-installed in .venv when possible. Falls back to LM Studio.
-# llama-cpp-python>=0.2.0
-
-# --- SMT solver (PhD-level math) ---
-z3-solver>=4.12.0.0
-
-# --- MobileCLIP vision (semantic UI grounding) ---
-torch>=2.0.0
-transformers>=4.30.0
-Pillow>=10.0.0
-
-# --- NLP for deterministic tool routing ---
-sentence-transformers>=2.7.0
-
-# --- Optional static analysis ---
-mypy>=1.5.0
-bandit>=1.7.0
-ruff>=0.3.0
-pytest>=8.0.0
-hypothesis>=6.100.0
+# II v2.0 -- default install is the lean core.
+# Heavy/optional integrations: requirements-optional.txt
+# Development tools:            requirements-dev.txt
+-r requirements-core.txt
