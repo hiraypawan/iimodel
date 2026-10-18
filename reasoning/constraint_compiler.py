@@ -104,7 +104,7 @@ class ConstraintCompiler:
         for expression in constraints:
             self.validate_expression(expression, variable_map)
         try:
-            from ii_smt import Z3Solver
+            from reasoning.ii_smt import Z3Solver
             result = Z3Solver().solve_constraints(declarations, constraints)
         except ImportError as exc:
             return {"satisfiable": None, "model": {}, "detail": str(exc)}

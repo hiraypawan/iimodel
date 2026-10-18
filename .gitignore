@@ -30,6 +30,8 @@ pip-delete-this-directory.txt
 
 # --- II state / runtime ---
 .ii_state/
+.ii_server.pid
+self_tools/
 .blackboard.json
 .cache/
 dist/

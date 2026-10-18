@@ -1,185 +1,369 @@
-# II v2.0 — Local Tool-Augmented Agent Prototype
+# II v3.0 — Pure Internet Intelligence (Deterministic Reasoning System)
 
-II is a local tool-augmented agent prototype developed by Pawan Hiray (identity: II v2.0). It connects an optional local language model (Qwen2.5-1.5B GGUF or LM Studio) to a Flask chat UI with web search, code execution, graph analysis, and steering helpers. When no LM Studio server is running, it operates in **agentic mode**: uses real-time internet search (Brave / SearXNG / DuckDuckGo / GitHub / Headless) and synthesizes answers directly from search results — no model backend required.
+**II = Internet Intelligence.** II is a local, deterministic reasoning system
+where "thinking" means *Python algorithms + live internet data + graph
+traversal + Z3 solving + DAG orchestration*. **The LLM never reasons.**
 
-## Status at a glance
+II is a **truth instrument**, not a thinking companion.
 
-**Works now**
+---
 
-- Agentic web-search synthesis (Brave / SearXNG / DuckDuckGo / GitHub /
-  Wikipedia) with citations -- usable with no model backend at all
-- Optional local chat via GGUF (`llama-cpp-python`) or LM Studio
-- Repository index + topology (SCC cycles, personalized PageRank, clusters)
-  injected into prompts; synthetic 30-file import-cycle fixture is tested
-- Blackboard interface contracts (locking, snapshots, inspector)
-- Gate-1 static verification; Z3 explicit-formula solving; bounded synthesis
-- License-gated GitHub ingestion (parses cloned code, never executes it)
-- `II_PRIVATE=1` no-network mode; SSRF guard on URL fetching; optional
-  Docker code-execution sandbox (see [docs/SECURITY.md](docs/SECURITY.md))
+## The 1.5B LLM is the renderer
 
-**Scaffolding (code exists, cannot run with shipped backends)**
+> The 1.5B LLM is the renderer: it formats structured JSON into natural
+> language and generates sandbox-verified code snippets. All reasoning, logic,
+> and conclusions come from deterministic Python algorithms.
 
-- Activation steering / linear probes (no hidden-state hook), TIES/DARE
-  array math (never loads weights), entropy-MCTS (no logit adapter),
-  KV paging (metadata only; transfer raises `NotImplementedError`),
-  MobileCLIP vision (endpoint returns 501)
+The local model (Qwen2.5-1.5B GGUF or an LM Studio server) does exactly two
+things:
 
-**Not implemented / not claimed**
+1. **Formatting** — turn the structured JSON produced by the algorithms into
+   natural Hinglish/English. The system prompt says, verbatim:
+   *"Stick strictly to the provided JSON. Do not add facts, ideas, or
+   conclusions."*
+2. **Constrained code generation** — short snippets (simulations, tool code,
+   bug fixes) from precise specs. **All generated code is sandbox-verified
+   before use.**
 
-- Any training or fine-tuning; any bundled model weights
-- Constrained decoding, verification Gates 2/3 without caller adapters
-- Benchmarks: the task dataset is empty, no model-quality scores exist
-- A sandbox in the default code-execution mode (see Security below)
+Forbidden for the model: open-ended ideation, factual claims, logical
+conclusions, brainstorming, opinions.
 
-## What is implemented
+Everything the model writes is checked by a **hallucination detector**
+(entity diff). A rejected rendering is discarded, retried once, and finally
+replaced with a dump of the raw JSON — the answer is never silently kept.
 
-| Component | Current scope and limitations |
+---
+
+## The status taxonomy (exact labels only)
+
+| Status | Meaning |
 |---|---|
-| Local chat | Uses `llama-cpp-python` with a user-provided GGUF or an OpenAI-compatible LM Studio server. With neither available, the app reports demo mode and does not generate model answers. |
-| Repository map | Indexes Python, JavaScript, TypeScript, JSX, and TSX declarations; resolves some local imports and unambiguous calls. Edges remain approximate. |
-| Graph analysis | Computes SCCs, personalized PageRank, and file clusters. It is a navigation aid, not a validated architecture model. A synthetic 30-file import-cycle fixture tests cycle detection; no raw-model-vs-II benchmark has been run. |
-| Verification | Static syntax/name/risk checks are available by default. Optional Gate 2/3 hooks require caller-supplied test and entailment adapters; skipped gates fail the full cascade. No code is executed by the default verifier. |
-| Constraints | A restricted explicit-formula parser can feed optional Z3. Sequential prose decomposition is heuristic; translation requires a caller-supplied adapter and does not guarantee a correct formalization. |
-| Steering/probes | Vector math, optional PyTorch hooks, and linear-probe plumbing are present. No model-specific vectors or probes are bundled, and current inference adapters do not expose compatible hidden-state hooks. |
-| TIES/DARE | Optional NumPy task-vector arithmetic returns new arrays; it does not load or modify model weights. |
-| KV paging | 64-token page summaries and retrieval metadata are implemented. Actual RAM/VRAM transfer and llama.cpp KV-cache integration deliberately raise `NotImplementedError`. |
-| Repo ingestion | Shallow GitHub clone, conservative root-license text filter, approximate graph construction, and JSON graph cache. Cloned code is parsed as data, never executed. License detection is not legal advice or a full SPDX parser. |
-| UI catalog | Ten original Flask/Jinja component **candidates** are included. None is approved; there is no renderer or generated-UI build pipeline. |
-| Evaluation | Produces human-review packets for supplied responses and supports raw-vs-II side-by-side packets. The task dataset is empty; the harness does not run models or auto-score factual correctness. |
-| Evidence | URL fetching retains source URLs and extracted passages. Numeric/negation conflict flags are rough review signals, not fact-checking. |
-| Code execution | Default mode is a resource-limited subprocess running with the current user's permissions -- **not a sandbox**. `II_CODE_SANDBOX=docker` gives fail-closed Docker isolation; `II_REQUIRE_SANDBOX=1` refuses subprocess mode. Do not expose this app to untrusted users. See [docs/SECURITY.md](docs/SECURITY.md). |
-| Vision | Reliable UI-region localization is not implemented; the endpoint remains disabled. |
+| `VERIFIED` | Every factual claim is backed by **≥ 2 independent live URLs**, with no unresolved conflicts. |
+| `PARTIAL` | Some steps were resolved, the final answer was not. **Always shows the work done and what is missing.** |
+| `SIMULATED` | A hypothesis was tested in a sandbox toy model. **Always** includes the baseline, the assumptions, and a disclaimer. |
+| `UNVALIDATED_COMBINATION` | A brainstorming output. The components are cited; **the combination is not validated**. |
+| `CONFLICT` | Sources disagree. Both sides are shown with URLs. **No answer is forced.** |
+| `INSUFFICIENT_DATA` | Fail-closed. Nothing was invented to fill the gap. |
 
-No scalar capability rating, 2 GB RAM guarantee, error-rate estimate, or general
-model-superiority claim is made. Memory depends on the selected model, backend,
-context size, and runtime configuration; it has not been measured here.
+**Fail-closed wins.** The system never returns an empty answer: it returns
+`PARTIAL` (steps taken + sources found) and states exactly what is missing.
+"No blank page paralysis" means *show your work*, not *invent an answer*.
 
-## Architecture and zero-training scope
+---
 
-No base-model weights are modified or trained. The available pieces form a
-partial, capability-gated pipeline rather than the fully integrated four-stage
-system proposed in the original research plan:
+## Honest capability statement
+
+II beats large AI models at:
+
+* **live, cited facts** — every claim carries its URL,
+* **zero-hallucination Q&A** — hallucination-resistant by design; every claim
+  is cited and entity-checked,
+* **local repository analysis** — the index, topology and verification run on
+  your machine,
+* **privacy** — the model runs locally; the Exocortex stores only what you
+  approve,
+* **cost** — no model API costs; search backends have free tiers and then
+  paid tiers,
+* **debuggability** — every stage is a Python function you can read and run.
+
+II does **NOT** match large AI models at:
+
+* nuanced reasoning,
+* creative writing,
+* open-ended conversation,
+* complex code architecture,
+* taste or judgement.
+
+**Do not claim otherwise anywhere.** Simulations prove nothing about the real
+world. No capability score, no proven-efficiency percentage and no
+zero-hallucination figure is published by this project, because none of them
+has been measured in a way that would justify the number.
+
+---
+
+## The II Way vs The AI Way
+
+| | The II Way | The AI Way |
+|---|---|---|
+| Where the answer comes from | Deterministic algorithms over live sources | Model weights |
+| Citations | Every factual claim carries a URL | Optional, often absent |
+| When the model is wrong | The rendering is rejected by the entity diff and re-generated | The wrong text stands |
+| Unknown data | `INSUFFICIENT_DATA` — the gap is named | Plausible-sounding text |
+| Multi-hop questions | Decomposed into ordered hops with a dependency graph | One prompt, one shot |
+| Memory | Opt-in, on disk, visible, deletable | Implicit, opaque |
+| Code you did not write | Executed only in the fail-closed Docker sandbox | Executed at the model's discretion |
+| Creative work | Mechanical recombination, explicitly labelled `UNVALIDATED_COMBINATION` | Presented as an idea |
+| Cost | No model API costs; search backends may become paid | Usually paid per token |
+| Failure mode | Fails closed and shows the work | Fails silently and sounds confident |
+
+**The AI Way wins at nuance, creativity and conversation.** II is not trying to
+replace it; II is trying to be *checkable*.
+
+---
+
+## Architecture
 
 ```text
-1. PRE-INFERENCE     Active: approximate repository index + topology summary
-                     Metadata only: KV-page summaries; no cache transfer
-2. MIDDLE LAYERS     Optional utilities: contrastive vectors, Gram-Schmidt,
-                     readout probes. No bundled vectors and no active-backend hook.
-3. DECODING           Not integrated: current model adapters expose no portable
-                     constrained-decoding/FSM interface. Entropy search requires
-                     a separate token-state adapter and is not wired to the app.
-4. POST-GENERATION    Active: static Python preflight. Full cascade is fail-closed
-                     unless caller supplies test/sandbox and entailment adapters.
+                      user request
+                           │
+                 ┌─────────▼─────────┐
+                 │  core/ii_agent.py │  router: crisis → fast path →
+                 │   route_task()    │  memory → interviewer → intent → DAG
+                 └─────────┬─────────┘
+                           │
+        ┌──────────────────┼───────────────────────┐
+        │                  │                       │
+  crisis scan      fast path (simple          DAG (core/dag_planner.py)
+  (empathy)        factual question)           asyncio, parallel branches
+        │                  │                       │
+        │                  │        ┌──────────────┼───────────────┐
+        │                  │        │              │               │
+        │                  │  logic tree     exocortex recall   interviewer
+        │                  │  (hop by hop)   (opt-in memory)  (≤2 questions)
+        │                  │        │              │               │
+        │                  └────────┴──────────────┴───────────────┘
+        │                                  │
+        │                       deterministic JSON result
+        │                                  │
+        │                  ┌───────────────▼────────────────┐
+        │                  │ core/caged_renderer.py          │
+        │                  │ strict prompt + entity-diff     │
+        │                  │ detector; reject → retry → dump  │
+        │                  └───────────────┬────────────────┘
+        ▼                                  ▼
+   crisis resources              natural-language answer
+   (nothing else runs)           with citations
 ```
 
-The `spectral` CLI spelling is retained as a compatibility alias for the
-approximate topology summary. The algorithms used are SCC detection, PageRank,
-and community clustering—not eigenvalue-based spectral graph methods.
+### Package layout (Phase 0 consolidation)
 
-## Quick start (recommended: LM Studio or agentic mode)
+| Path | Contents |
+|---|---|
+| `main.py`, `app.py`, `bootstrap.py` | The only root-level Python files. |
+| `core/` | Router (`ii_agent.py`), state, security, model adapter, DAG planner, critic loop, caged renderer, NLP helpers. |
+| `reasoning/` | Logic-tree solver, Z3 adapter, constraint compiler, verification cascade, bounded synthesis, TF-IDF utilities. |
+| `ingestion/` | Web search/fetch (`ii_web.py`), repository ingestion, license screening. |
+| `interaction/` | Interviewer, empathy module, brainstorming engine. |
+| `invention/` | Combinatorial hypothesis engine (experimental). |
+| `memory/` | Exocortex — disk-backed paged memory. |
+| `server/` | Flask app helpers, UI heuristics. |
+| `tools/` | Self-tool builder and friends. |
+| `graph/`, `blackboard/`, `vendor/` | Repository graph, blackboard, remaining vendor adapters. |
+| `archive/` | Quarantined scaffolding (see `archive/README.md`). |
+| `self_tools/` | Generated tools + `tool_registry.json` (runtime, git-ignored). |
 
-**Agentic mode** (no LM Studio required): uses internet search (Brave / SearXNG / DuckDuckGo / GitHub API / Headless browser) and synthesizes answers directly from real-time results. Works with a Python 3.11 virtual environment (`.venv`) without a GGUF file.
+---
 
-1. Install LM Studio, load a compatible local GGUF, and start its OpenAI-compatible
-   server at `http://127.0.0.1:1234`.
-2. Install Python 3.11 and the dependencies:
+## The Exocortex (disk-backed paged memory)
 
-   **Windows (PowerShell):**
-   ```powershell
-   py -3.11 -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-   python -m pip install --upgrade pip
-   pip install -r requirements.txt
-   python app.py
-   ```
+The Exocortex is II's memory. It is **disk-backed and paged**, and it is
+transparent by construction.
 
-   **macOS/Linux:**
-   ```bash
-   python3.11 -m venv .venv
-   . .venv/bin/activate
-   python -m pip install --upgrade pip
-   pip install -r requirements.txt
-   python app.py
-   ```
+**What is stored**
 
-3. Open `http://127.0.0.1:5000/`; check `GET /api/status` for backend mode.
+| Table | Contents |
+|---|---|
+| `facts` | key, value, source URL, timestamp — only facts you approved |
+| `episodes` | summary and timestamps of recorded work sessions |
+| `tool_runs` | tool name, success flag, latency (bookkeeping only) |
+| `meta` | consent state and index metadata |
 
-The Windows launchers install the core requirements and start the app; they do
-not download model weights. `requirements.txt` installs only the lean core
-(`requirements-core.txt`, including `llama-cpp-python` for direct GGUF use with
-a separately downloaded model). Heavy optional integrations (torch,
-transformers, Playwright, sentence-transformers) are in
-`requirements-optional.txt`; development tools are in `requirements-dev.txt`.
-Virtual environments are never committed to git (`.venv`, `.venv311` are
-ignored).
+Retrieval uses **TF-IDF keyword vectors** in an on-disk FAISS index — no
+neural embedding model is downloaded, so the memory stays inside the RAM
+budget. (A neural re-ranker is listed as future work with an explicit size
+budget in `memory/exocortex.py`.)
 
-## CLI and API
+**Profiling is opt-in — never silent**
+
+* On first use II *asks* before storing anything.
+* Nothing is written until you approve the memory feature **and** each
+  individual proposed item.
+* Silent background profiling is forbidden by design.
+* Revoking consent deletes the stored facts.
 
 ```bash
-python main.py graph
-python main.py topology                 # `spectral` is a compatibility alias
-python main.py verify --input path/to/file.py
-cat path/to/file.py | python main.py verify
-python main.py verify --full-cascade < path/to/file.py
-python main.py steer --action list
-python main.py ingest --repo https://github.com/OWNER/REPO
-python main.py benchmark --dataset path/to/reviewed_tasks.json --responses run.jsonl
-python main.py chat
+# see exactly what is remembered
+python main.py memory --action show
+
+# approve the memory feature
+python main.py memory --action optin
+
+# forget one fact
+python main.py memory --action forget --key "preference:language"
+
+# forget everything and revoke consent
+python main.py memory --action optout
 ```
 
-The verifier reads a named file when `--input` points to one; otherwise it reads
-stdin through EOF. Static verify prints machine-readable JSON and exits nonzero
-on a failed check. Full-cascade mode currently fails closed because the default
-runner and entailment adapters are not configured. Steering list shows proposed
-style names separately from available vector files; applying a vector is not
-supported by the shipped inference adapters.
+The same view is available at `GET /api/memory` and `POST /api/memory/forget`.
 
-The Flask app exposes `/api/graph`, `/api/graph/topology`, `/api/blackboard/graph`,
-`/api/repos/ingest`, `/api/repos/graph`, `/api/verify`, and `/api/steer` in addition
-to chat and helper routes. Repository API ingestion is a blocking local Git clone
-with conservative resource caps; the API has no authentication and must not be
-exposed to untrusted clients. See
-[`docs/API.md`](docs/API.md) for the current API contract.
+---
 
-## Tests and validation
+## Install and run
+
+**Requirements**: Python 3.11+. A local model is *optional* — without one II
+renders structured results deterministically instead of through the LLM.
+
+### macOS / Linux
+
+```bash
+./setup.sh          # creates .venv and installs requirements.txt
+./start.sh          # starts the server on http://127.0.0.1:5000
+./stop.sh           # stops it
+```
+
+### Windows
+
+```bat
+INSTALL_AND_RUN.bat
+```
+
+(the `.bat` launchers are unchanged; `setup.sh`, `start.sh` and `stop.sh`
+mirror them.)
+
+### Manual
+
+```bash
+python3.11 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+python app.py                 # 127.0.0.1:5000
+python app.py --host 0.0.0.0  # prints a loud exposure warning
+```
+
+Model weights are **not** bundled and are never downloaded automatically. For
+local GGUF chat, place a compatible file in `models/` and install
+`llama-cpp-python`, or start LM Studio at `http://127.0.0.1:1234`.
+
+### Environment switches
+
+| Variable | Meaning |
+|---|---|
+| `II_API_KEY` | When set, every `/api/*` route requires this key (`X-II-API-Key` header or `Authorization: Bearer`). Unauthenticated requests get **HTTP 401**. |
+| `II_PRIVATE=1` | Disable every network-egress tool (search, fetch, research, repo ingestion). |
+| `II_CODE_SANDBOX=docker` | Run generated code in the fail-closed Docker sandbox. `subprocess` (the default) is **not** a sandbox. |
+| `II_REQUIRE_SANDBOX=1` | Refuse to execute code in subprocess mode at all. |
+| `II_DATA_DIR` | Where the Exocortex stores its database and vector index. |
+
+The server binds to **127.0.0.1 by default**. `--host` with any other address
+prints a loud warning, because the API is a local research tool.
+
+---
+
+## Command line
+
+```bash
+python main.py ask "What is the capital of France?"   # full router pipeline
+python main.py solve "Who is the CEO of the company that created WhatsApp?"
+python main.py interview "Build a post, then publish it on my site"
+python main.py brainstorm "urban food and energy"
+python main.py hypothesize "reduce fouling on heat exchangers"
+python main.py memory --action show
+python main.py topology            # 'spectral' is a deprecated alias
+python main.py verify --input path/to/file.py
+python main.py graph
+python main.py ingest --repo https://github.com/OWNER/REPO
+```
+
+---
+
+## HTTP API
+
+The server binds to `127.0.0.1:5000` by default.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /` | Chat page |
+| `GET /api/status` | Backend state, **active pipeline stages** (reported truthfully), auth mode |
+| `POST /api/chat` | The Pure II pipeline. Body: `{"message": "..."}`. Optional `"pipeline": "legacy"` for the older tool-calling loop. |
+| `POST /api/solve` | Logic-tree solver; returns `{status, steps, final_answer, sources, missing}` |
+| `POST /api/interview` | Constraint extraction + at most two questions |
+| `GET /api/memory` | Exactly what the Exocortex remembers |
+| `POST /api/memory/optin` | Grant or revoke memory consent |
+| `POST /api/memory/forget` | Forget one key or everything |
+| `POST /api/brainstorm` | Mechanical recombination of live components |
+| `POST /api/hypothesize` | Sandbox-tested toy hypotheses (`SIMULATED`, never `VERIFIED`) |
+| `GET /api/graph`, `GET /api/graph/topology` | Approximate repository index and topology |
+| `POST /api/verify` | Static checks / fail-closed cascade |
+| `POST /api/search`, `POST /api/fetch`, `POST /api/research` | Web tools (403 under `II_PRIVATE=1`) |
+| `POST /api/repos/ingest`, `GET /api/repos/graph` | License-gated GitHub ingestion |
+| `GET/POST /api/steer` | **501** — activation steering was archived |
+| `POST /api/vision` | **501** — the vision prototype is not part of Pure II |
+
+See [`docs/API.md`](docs/API.md) for the full contract and
+[`docs/SECURITY.md`](docs/SECURITY.md) before exposing anything.
+
+---
+
+## Tests and benchmarks
 
 ```bash
 python -m compileall -q -f .
-python _test_graph.py
-python _test_full.py
-python -m unittest discover -s tests -v
-python blackboard/component_catalog/validate_catalog.py
+python -m pytest tests -q                 # the whole suite
+python -m pytest tests/benchmarks -q      # the benchmark suite
+python -m pytest archive/tests -q         # the archived scaffolding tests
 ```
 
-Tests cover synthetic graph/index fixtures, including a 30-file circular import
-fixture, plus helpers and Flask routes. They do not measure model quality. Real
-GGUF inference and a live LM Studio server have not been validated in the
-current test run.
+The benchmark suite (`tests/benchmarks/`) uses **external ground truth only** —
+it never asserts that II agrees with itself:
 
-## Limitations, sources, and safety
+| Benchmark | What it proves |
+|---|---|
+| `test_ground_truth.py` | 20 hand-written public facts: `VERIFIED`, expected answer present, ≥ 2 URLs, every URL HTTP 200, expected source domains |
+| `test_logic_tree.py` | Canonical multi-hop questions produce the exact hop count and order |
+| `test_citations.py` | Every URL resolves and every quote really appears on the page |
+| `test_status_honesty.py` | The hypothesis pipeline never says `VERIFIED`; `SIMULATED` always carries a baseline and assumptions |
+| `test_determinism.py` | The same query twice produces the same structure |
+| `test_fail_closed.py` | A nonsense query returns `INSUFFICIENT_DATA` and fabricates nothing |
+| `test_dag_concurrency.py` | Independent DAG nodes overlap in the event log (no wall-clock assertions) |
+| `test_hallucination_detector.py` | Injected entities are caught; the blind spots are documented |
+| `test_interviewer.py` | Never more than two questions, never an infinite loop |
+| `test_exocortex_optin.py` | Zero memory writes before consent |
+| `test_self_tool_builder.py` | Strict template, sandbox refusal, critic checks |
+| `test_empathy.py` | Crisis-first behaviour, sourced techniques, mandatory disclaimer |
+| `test_banned_claims.py` | The repository contains no banned claim |
+| `test_ram_budget.py` | A complex task stays under 2 GB of resident memory |
 
-Read [`docs/VENDOR_CREDITS.md`](docs/VENDOR_CREDITS.md) for license references.
-It clarifies that no third-party source code was copied into
-`vendor/`. The project code is licensed under MIT; see [`LICENSE`](LICENSE).
-Model weights remain subject to their own license and terms.
+Network-dependent benchmarks are **skipped** (not failed) when the machine has
+no outbound internet, so the suite stays green offline while staying strict
+online.
 
-Web search and URL fetch contact external services and sites. Local inference can
-stay on-device when configured locally and when web tools are not used, but the
-whole system is not universally free, private, or air-gapped. The development
-server has no authentication and should remain on a trusted local machine.
+---
 
-**Security (read [docs/SECURITY.md](docs/SECURITY.md) before exposing anything):**
+## Security
 
-- Set `II_PRIVATE=1` to disable all network tools (`search_web`, `read_url`,
-  `research`, `/api/search`, `/api/fetch`, `/api/research`, repo ingestion).
-  Local model chat, graph, blackboard, verification, SMT and synthesis keep
-  working; agentic (search-only) mode cannot answer while private mode is on.
-- `/api/fetch` and `read_url` pass an **SSRF guard**: only public http(s) URLs
-  are fetched; loopback/private/link-local/reserved targets, `localhost`, and
-  cloud-metadata addresses are refused. Redirect targets and DNS-rebinding
-  remain residual risks documented in `docs/SECURITY.md`.
-- `/api/repos/ingest` only accepts public `https://github.com/OWNER/REPO` URLs,
-  but it runs a local `git clone` subprocess and is blocked under `II_PRIVATE`.
-- `execute_code` is **not sandboxed by default**. Prefer
-  `II_CODE_SANDBOX=docker` (fail-closed) for any untrusted code.
+* **`II_API_KEY`** — set it and every `/api/*` route answers **401** without
+  the key. Without it the API is unauthenticated, which is only acceptable
+  because the server binds to localhost.
+* **SSRF guard** — `/api/fetch` and every fetch inside the pipeline only
+  accept public http(s) URLs. Loopback, private, link-local, reserved and
+  cloud-metadata targets are refused.
+* **`II_PRIVATE=1`** — disables every network-egress tool.
+* **Code execution** — the default subprocess mode runs with your permissions
+  and is **not** a sandbox. `II_CODE_SANDBOX=docker` is fail-closed Docker
+  isolation; `II_REQUIRE_SANDBOX=1` refuses the subprocess mode entirely.
+  **Fetched or generated code is only ever run in the Docker sandbox** — the
+  self-tool builder fails closed when Docker is missing.
+* **No silent profiling** — see the Exocortex section above.
 
+Read [`docs/SECURITY.md`](docs/SECURITY.md) before exposing the server.
+
+---
+
+## Limitations, sources and licensing
+
+* Web search and URL fetching contact external services. The system is not
+  universally free, private or air-gapped.
+* Repository graphs, clusters and PageRank are **navigation aids**, not
+  architectural truth.
+* The verification cascade fails closed unless caller-supplied test and
+  entailment adapters are provided.
+* Simulated hypotheses are toy-model estimates, never empirical proof.
+* Model weights remain under their own licence. This project's code is MIT
+  (see [`LICENSE`](LICENSE)); see [`docs/VENDOR_CREDITS.md`](docs/VENDOR_CREDITS.md).
+
+## Project plan
+
+* [`PLAN.md`](PLAN.md) — the phased implementation plan (v4 order).
+* [`ROADMAP.md`](ROADMAP.md) — what is next, and what is explicitly out of
+  scope.

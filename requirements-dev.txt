@@ -1,4 +1,4 @@
-# II v2.0 -- development tools only (not needed to run the app)
+# II v3.0 -- development tools only (not needed to run the app)
 -r requirements-core.txt
 
 pytest>=8.0.0

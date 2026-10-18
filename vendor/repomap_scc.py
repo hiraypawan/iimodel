@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from graph.topology import GraphTopologyAnalyzer
-from ii_graph import CodebaseKnowledgeGraph
+from graph.ii_graph import CodebaseKnowledgeGraph
 
 
 class RepoMapSCC:

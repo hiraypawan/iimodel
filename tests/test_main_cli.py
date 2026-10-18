@@ -23,21 +23,26 @@ class MainCliTests(unittest.TestCase):
             check=False,
         )
 
-    def test_steer_list_reports_no_applied_activation(self):
-        result = self.run_main("steer", "--action", "list")
+    def test_query_can_be_passed_positionally(self):
+        result = self.run_main("interview", "Build a post, then publish it on my site")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
-        self.assertFalse(payload["applied"])
-        self.assertIn("supported_styles", payload)
-        self.assertIn("available_vectors", payload)
+        self.assertIn("constraint_tree", payload)
+        self.assertLessEqual(len(payload.get("questions", [])), 2)
+
+    def test_steer_is_archived_and_reports_no_activation(self):
+        result = self.run_main("steer", "--action", "list")
+
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("[ARCHIVED]", result.stdout)
+        self.assertNotIn("applied", result.stdout)
 
     def test_steer_apply_fails_closed_without_backend_hook(self):
         result = self.run_main("steer", "--action", "apply", "--vector", "example")
 
         self.assertEqual(result.returncode, 2)
-        self.assertIn("[UNAVAILABLE]", result.stdout)
-        self.assertIn("model-layer hook", result.stdout)
+        self.assertIn("[ARCHIVED]", result.stdout)
 
     def test_benchmark_cli_writes_human_review_packet_for_empty_fixture(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from vendor.kv_pager import KVCachePager, KVPageSummary
+from archive.vendor.kv_pager import KVCachePager, KVPageSummary
 
 
 class KVPagingManager:

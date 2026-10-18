@@ -1,3 +1,3 @@
 """Compatibility facade for root UI heuristic helpers."""
 
-from ii_ui_heuristics import *  # noqa: F403
+from server.ii_ui_heuristics import *  # noqa: F403

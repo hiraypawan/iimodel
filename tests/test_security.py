@@ -7,8 +7,8 @@ import socket
 import unittest
 from unittest.mock import patch
 
-import ii_security
-from ii_security import (
+import core.ii_security as ii_security
+from core.ii_security import (
     is_private_mode,
     run_python_code,
     sandbox_mode,
@@ -34,7 +34,7 @@ class PrivateModeTests(unittest.TestCase):
                 self.assertFalse(is_private_mode(), value)
 
     def test_web_tools_blocked_without_network(self):
-        import ii_web
+        import ingestion.ii_web as ii_web
 
         with patch.dict(os.environ, {"II_PRIVATE": "1"}):
             self.assertIn("II_PRIVATE", ii_web.search_web("anything"))
@@ -104,7 +104,7 @@ class UrlValidationTests(unittest.TestCase):
                 validate_public_url(url, resolver=_fake_resolver("93.184.216.34"))
 
     def test_read_url_reports_blocked_url_without_fetching(self):
-        import ii_web
+        import ingestion.ii_web as ii_web
 
         result = ii_web.read_url("http://127.0.0.1:5000/api/state")
         self.assertIn("blocked URL", result)

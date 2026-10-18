@@ -5,7 +5,7 @@ if not exist ".venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
-echo II v2.0 - test suite
+echo II v3.0 - test suite
 .venv\Scripts\python.exe --version
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 pause

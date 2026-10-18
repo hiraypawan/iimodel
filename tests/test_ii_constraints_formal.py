@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ii_constraints import ConstraintSharder
+from reasoning.ii_constraints import ConstraintSharder
 
 
 class FormalConstraintIntegrationTests(unittest.TestCase):

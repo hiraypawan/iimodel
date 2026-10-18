@@ -1,1 +1,3 @@
-"""Compatibility package for the root command-line entry point."""
+"""Command-line entry point facade (``main.py`` at the repository root)."""
+
+__all__ = []

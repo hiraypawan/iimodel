@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ii_state import StateManager
+from core.ii_state import StateManager
 
 
 class StateExtensionTests(unittest.TestCase):

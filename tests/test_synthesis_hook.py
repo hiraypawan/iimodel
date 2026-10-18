@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ii_synthesis import EnumerativeSynthesizer
+from reasoning.ii_synthesis import EnumerativeSynthesizer
 
 
 class SynthesisHookTests(unittest.TestCase):

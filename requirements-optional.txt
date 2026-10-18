@@ -1,12 +1,12 @@
-# II v2.0 -- optional integrations. NOT required for the core app and NOT
-# installed by requirements.txt.  Installing these does not guarantee the
+# II v3.0 -- optional integrations. NOT required for the core app and NOT
+# installed by requirements.txt.  Installing these does not guarantee that the
 # active backend exposes hidden states, KV-cache forks, logits, or
-# constrained-decoding hooks (Stages 2-4 remain scaffolding).
+# constrained-decoding hooks (those experiments were archived in v3.0).
 
 # Headless-browser search fallback (also needs: playwright install chromium)
 playwright>=1.40.0
 
-# Vision prototype (MobileCLIP-style grounding; endpoint still returns 501)
+# Archived vision prototype (MobileCLIP-style similarity; endpoint 501)
 torch>=2.0.0
 transformers>=4.30.0
 Pillow>=10.0.0

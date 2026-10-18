@@ -157,16 +157,25 @@ const send = document.getElementById('send');
 const empty = document.getElementById('empty');
 const backendStatus = document.getElementById('backendStatus');
 
-fetch('/api/status').then(r => r.json()).then(status => {
+const API_KEY = {{ api_key|tojson }};
+const apiHeaders = {'Content-Type': 'application/json'};
+if (API_KEY) { apiHeaders['X-II-API-Key'] = API_KEY; }
+
+fetch('/api/status', {headers: apiHeaders}).then(r => r.json()).then(status => {
   if (status.chat_ready) {
-    backendStatus.textContent = `Model backend: ${status.backend}`;
+    backendStatus.textContent = `Model backend: ${status.backend} (renderer only)`;
     backendStatus.className = 'ready';
-    empty.textContent = 'A local model backend is connected. Search and URL fetch use the internet; code execution runs with the current user’s permissions and is not sandboxed.';
+    empty.textContent = 'II runs the deterministic pipeline: live cited sources, graph traversal and DAG orchestration. The local model is the renderer only. Search and URL fetch use the internet; code execution runs with the current user\u2019s permissions and is not sandboxed.';
   } else {
-    backendStatus.textContent = 'Demo mode — no model connected';
+    backendStatus.textContent = 'No model connected \u2014 deterministic rendering only';
     backendStatus.title = status.setup_message || 'Connect a model backend.';
     backendStatus.className = 'demo';
-    empty.textContent = 'Chat is in demo mode and cannot generate AI answers. Connect LM Studio or provide a GGUF model. Search and URL fetch use the internet; code execution runs locally and is not sandboxed.';
+    empty.textContent = 'II still answers with the deterministic pipeline and cites its sources; without a model backend the results are rendered as structured text instead of prose. Connect LM Studio or provide a GGUF model for natural-language rendering.';
+  }
+  const stages = status.pipeline_stages || {};
+  const active = Object.entries(stages).filter(([, s]) => s.active).map(([name]) => name);
+  if (active.length) {
+    backendStatus.title = 'Active pipeline stages: ' + active.join(', ');
   }
 }).catch(() => {
   backendStatus.textContent = 'Backend status unavailable';
@@ -223,7 +232,7 @@ async function sendMessage(){
   setTyping(true);
   try{
     const res = await fetch('/api/chat', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers: apiHeaders,
       body: JSON.stringify({message: text})
     });
     const data = await res.json();
@@ -231,6 +240,12 @@ async function sendMessage(){
     if(data.error){ addMessage('ii','Error: '+data.error); return; }
     const response = data.response || '';
     addMessage('ii', response);
+    if (data.status) {
+      addMessage('ii', `\n[status: ${data.status} | intent: ${data.intent || 'n/a'}]`);
+    }
+    (data.questions || []).forEach(q => {
+      addMessage('ii', `\n[question - ${q.slot}] ${q.question}\n(default: ${q.default})`);
+    });
     // render code blocks
     const fenceRe = /```python\s*\n([\s\S]*?)\n```/g;
     let m;

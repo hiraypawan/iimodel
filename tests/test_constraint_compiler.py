@@ -63,7 +63,7 @@ class ConstraintCompilerTests(unittest.TestCase):
 
     @unittest.skipUnless(importlib.util.find_spec("z3"), "z3-solver is optional")
     def test_z3_uses_restricted_compiler_for_explicit_constraints(self):
-        from ii_smt import Z3Solver
+        from reasoning.ii_smt import Z3Solver
 
         result = Z3Solver().solve_constraints(
             [("x", "Int"), ("y", "Int")],
@@ -74,7 +74,7 @@ class ConstraintCompilerTests(unittest.TestCase):
 
     @unittest.skipUnless(importlib.util.find_spec("z3"), "z3-solver is optional")
     def test_proof_step_result_means_counterexample_exists(self):
-        from ii_smt import Z3Solver
+        from reasoning.ii_smt import Z3Solver
 
         solver = Z3Solver()
         variables = [("x", "Int")]

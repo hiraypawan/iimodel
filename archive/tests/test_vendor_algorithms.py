@@ -5,9 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from reasoning.entropy_mcts import EntropyMCTS
-from vendor.kv_pager import KVCachePager
-from vendor.orthogonal_steering import (
+from archive.reasoning.entropy_mcts import EntropyMCTS
+from archive.vendor.kv_pager import KVCachePager
+from archive.vendor.orthogonal_steering import (
     contrastive_vector,
     gram_schmidt,
     mean_vector,
@@ -16,8 +16,8 @@ from vendor.orthogonal_steering import (
     load_vector,
     vector_norm,
 )
-from vibe.probes import LinearProbe, PROBE_NAMES
-from vibe.steering import STYLE_NAMES, SteeringController
+from archive.vibe.probes import LinearProbe, PROBE_NAMES
+from archive.vibe.steering import STYLE_NAMES, SteeringController
 
 
 class FakeTokenModel:
@@ -70,7 +70,7 @@ class VendorAlgorithmTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec("numpy"), "NumPy is optional")
     def test_ties_and_dare_are_pure_array_operations(self):
         import numpy as np
-        from vendor.ties_merging import apply_task_vector, dare_sparsify, ties_merge
+        from archive.vendor.ties_merging import apply_task_vector, dare_sparsify, ties_merge
 
         first = np.array([1.0, 3.0])
         second = np.array([2.0, -2.0])
