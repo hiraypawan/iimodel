@@ -283,7 +283,7 @@ CITATION RULES (MANDATORY for web-derived answers):
   6. Before finalizing, re-read your answer and verify every [n] maps to a real source returned by the search tool.
 
 CRITICAL RULES:
-  1. NEVER output raw JSON tool-call blocks like {"name": "...", "arguments": {...}} as your final response.
+  1. NEVER output raw JSON tool-call blocks like {{"name": "...", "arguments": {{...}}}} as your final response.
   2. Always call tools through the proper tool-calling interface, then write natural language text.
   3. If you call a tool, WAIT for the result, then write your answer in plain text.
   4. Never output raw function-call JSON as your final response to the user.
