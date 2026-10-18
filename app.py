@@ -398,6 +398,25 @@ def extract_code_block(text: str) -> Optional[str]:
     return None
 
 
+def _needs_web_search(user_message: str) -> bool:
+    """Heuristic: does this question likely need live web search?"""
+    text = user_message.lower()
+    current_event_keywords = [
+        "today", "yesterday", "this week", "this month", "this year",
+        "latest", "recent", "news", "current", "now", "happening",
+        "who is", "what is", "where is", "when did", "why did",
+        "new", "just released", "just announced", "brea", "update",
+        "status", "status of", "status of the", "status of repo",
+        "github", "trending", "viral", "popular", "top",
+        "is", "are", "does", "did", "can", "could", "would", "will",
+        "who", "what", "where", "when", "why", "how",
+    ]
+    for kw in current_event_keywords:
+        if kw in text:
+            return True
+    return False
+
+
 def _extract_raw_tool_json(text: str) -> str | None:
     """Extract raw JSON tool-call from text, handling markdown fences.
     Searches for JSON tool-call patterns anywhere in the text."""
@@ -487,16 +506,23 @@ def api_chat():
         })
 
     STATE.append_state_fact(f"user_message:{len(STATE._state_ledger)}", user_message)
-    messages = [{"role": "user", "content": user_message}]
+
+    # Build the system prompt
     sys_prompt = build_system_prompt()
+
+    # Messages for the model
+    messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_message}]
 
     final_text = ""
     research_sources: dict[str, dict] = {}
     citation_verification: dict | None = None
 
-    for _ in range(10):
+    # Track if we forced a search
+    forced_search = False
+
+    for iteration in range(8):
         resp = MODEL.chat(
-            messages=[{"role": "system", "content": sys_prompt}] + messages,
+            messages=messages,
             tools=TOOLS,
             temperature=0.2,
         )
@@ -513,11 +539,33 @@ def api_chat():
                     args = json.loads(args)
                 observation = dispatch_tool(fn, args)
 
+                # Capture sources from research tool
                 if fn == "research":
                     try:
                         research_data = json.loads(observation)
                         research_sources = research_data.get("sources", {})
                     except json.JSONDecodeError:
+                        pass
+
+                # Capture sources from search_web tool
+                elif fn == "search_web":
+                    try:
+                        import json as _json
+                        start = observation.find("RAW_JSON_START")
+                        end = observation.find("RAW_JSON_END")
+                        if start != -1 and end != -1:
+                            json_str = observation[start + len("RAW_JSON_START"):end].strip()
+                            search_data = _json.loads(json_str)
+                            for r in search_data.get("results", []):
+                                cid = r.get("citation_id", "[?]")
+                                research_sources[cid] = {
+                                    "title": r.get("title", ""),
+                                    "link": r.get("link", ""),
+                                    "snippet": r.get("snippet", ""),
+                                    "source": r.get("source", ""),
+                                    "authority_score": r.get("authority_score", 0),
+                                }
+                    except Exception:
                         pass
 
                 messages.append(
@@ -530,7 +578,7 @@ def api_chat():
                 )
             continue
 
-        # Case 2: Model output raw JSON tool-call instead of proper tool call
+        # Case 2: Model output raw JSON tool-call
         raw_json = _extract_raw_tool_json(content)
         if raw_json:
             try:
@@ -564,23 +612,58 @@ def api_chat():
             except Exception:
                 pass
 
-        # Case 3: Model gave final text answer
-        final_text = content
+        # Case 3: Model gave text answer (possibly empty)
+        final_text = content.strip()
         messages.append({"role": "assistant", "content": final_text})
+
+        # If model gave no meaningful answer and we haven't forced search yet,
+        # and the question needs web info, force search_web
+        if not final_text or len(final_text.strip()) < 5:
+            if not forced_search and _needs_web_search(user_message):
+                print(f"[FORCE-SEARCH] Model returned empty, forcing search: {user_message[:50]}...")
+                obs = search_web(user_message)
+                forced_search = True
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": "forced-search-" + str(abs(hash(user_message))),
+                        "name": "search_web",
+                        "content": obs,
+                    }
+                )
+                continue
+            # If we already forced search or it doesn't need search, break
+            break
+
+        # Model gave non-empty answer - check if it needs citations
+        if not tool_calls and research_sources and _needs_web_search(user_message):
+            # Model answered without using search tools but question needs web info
+            # Force it to re-answer with citations
+            fix_prompt = (
+                f"You previously answered without using search tools. "
+                f"Please re-answer using the following search results with citations [1], [2], etc.:\n\n"
+                f"Question: {user_message}\n\n"
+                f"Answer using the sources above. Cite every factual claim.\n"
+            )
+            resp = MODEL.chat(
+                messages=[{"role": "system", "content": sys_prompt}] + messages + [{"role": "user", "content": fix_prompt}],
+                tools=None,
+                temperature=0.2,
+            )
+            final_text = resp.get("content", "") or ""
         break
 
     # Self-verification: check citations against sources
     citation_verification = verify_answer_citations(final_text, research_sources)
 
-    # If citations are missing, ask model to fix (up to 3 rounds)
+    # If citations are missing, ask model to fix (up to 2 rounds)
     fix_rounds = 0
-    while not citation_verification["verified"] and fix_rounds < 3:
+    while not citation_verification["verified"] and fix_rounds < 2:
         fix_rounds += 1
         fix_prompt = (
             f"Your answer has missing or invalid citations: {citation_verification['missing_citations']}.\n"
             f"Available sources: {json.dumps({k: v for k, v in research_sources.items() if k in citation_verification.get('unused_sources', [])}, ensure_ascii=False)}\n"
-            f"Please rewrite your answer with correct citations [1], [2], etc. "
-            f"Only cite sources that were returned by the search tool.\n"
+            f"Please rewrite your answer with correct citations [1], [2], etc.\n"
             f"Original answer:\n{final_text}"
         )
         resp = MODEL.chat(
@@ -595,9 +678,16 @@ def api_chat():
     if _extract_raw_tool_json(final_text):
         final_text = (
             "I tried to use a tool but couldn't process the result properly. "
-            "Please try asking your question again, or ask a simpler question."
+            "Please try asking your question again."
         )
         citation_verification = {"verified": True, "missing_citations": [], "unused_sources": []}
+
+    # If still no meaningful response, return a helpful message
+    if not final_text or len(final_text.strip()) < 3:
+        final_text = (
+            "I couldn't generate a proper response. "
+            "Please try asking your question again, or ask me to search for something specific."
+        )
 
     code = extract_code_block(final_text)
     if code:
