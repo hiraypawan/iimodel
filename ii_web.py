@@ -34,6 +34,12 @@ except ImportError:
 
 
 # --------------------------------------------------------------------------- #
+# Search result cache (300-second TTL for speed)
+# --------------------------------------------------------------------------- #
+_search_cache: dict[str, tuple[str, float]] = {}
+
+
+# --------------------------------------------------------------------------- #
 # Public SearXNG instances (no API key, community-run)
 # If one is down, the next is tried automatically.
 # --------------------------------------------------------------------------- #
@@ -228,6 +234,107 @@ def _search_wikipedia(query: str, max_results: int) -> list[SearchResult]:
 
 
 # --------------------------------------------------------------------------- #
+# Backend: Brave Search (free, no key required for basic tier)
+# --------------------------------------------------------------------------- #
+def _search_brave(query: str, max_results: int) -> list[SearchResult]:
+    results: list[SearchResult] = []
+    try:
+        if requests is not None:
+            resp = requests.get(
+                "https://api.search.brave.com/res/v1/web/search",
+                params={"q": query, "count": max_results},
+                headers={
+                    "Accept": "application/json",
+                    "X-Subscription-Token": "",  # Free tier: empty or basic
+                    "User-Agent": "II-Agent/1.0",
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                for i, item in enumerate(data.get("web", {}).get("results", [])[:max_results], 1):
+                    results.append(SearchResult(
+                        citation_id=_make_citation_id(i),
+                        title=item.get("title", ""),
+                        link=item.get("url", ""),
+                        snippet=item.get("description", ""),
+                        source="brave",
+                        fetched_at=datetime.now(timezone.utc).isoformat(),
+                        authority_score=85,
+                    ))
+    except Exception:
+        pass
+    return results
+
+
+# --------------------------------------------------------------------------- #
+# Backend: Headless browser (Playwright) — pulls live info from pages
+# --------------------------------------------------------------------------- #
+def _search_headless(query: str, max_results: int) -> list[SearchResult]:
+    results: list[SearchResult] = []
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            # Use a simple search URL construction for headless pull
+            search_url = f"https://duckduckgo.com/html/?q={query.replace(' ', '+')}"
+            page.goto(search_url, timeout=15000)
+            html = page.content()
+            browser.close()
+            # Quick extract: find result titles/links from DuckDuckGo HTML
+            import re as _re
+            matches = _re.findall(r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, _re.DOTALL)
+            for i, (link, title_raw) in enumerate(matches[:max_results], 1):
+                title = _re.sub(r"<.*?>", "", title_raw).strip()
+                if title and link.startswith("http"):
+                    results.append(SearchResult(
+                        citation_id=_make_citation_id(i),
+                        title=title[:200],
+                        link=link,
+                        snippet="Live headless browser extraction",
+                        source="headless",
+                        fetched_at=datetime.now(timezone.utc).isoformat(),
+                        authority_score=80,
+                    ))
+    except Exception:
+        pass
+    return results
+
+
+# --------------------------------------------------------------------------- #
+# Backend: GitHub Search (public API, no key required for basic search)
+# --------------------------------------------------------------------------- #
+def _search_github(query: str, max_results: int) -> list[SearchResult]:
+    if requests is None:
+        return []
+    results: list[SearchResult] = []
+    try:
+        # GitHub public search endpoint (no auth required for basic search)
+        resp = requests.get(
+            "https://api.github.com/search/repositories",
+            params={"q": query, "sort": "stars", "order": "desc", "per_page": max_results},
+            timeout=15,
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "II-Agent/1.0"},
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            for i, item in enumerate(data.get("items", [])[:max_results], 1):
+                results.append(SearchResult(
+                    citation_id=_make_citation_id(i),
+                    title=item.get("full_name", item.get("name", "")),
+                    link=item.get("html_url", ""),
+                    snippet=item.get("description", "")[:300],
+                    source="github",
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    authority_score=95,
+                ))
+    except Exception:
+        pass
+    return results
+
+
+# --------------------------------------------------------------------------- #
 # Backend 4: Crossref (free, no key — academic papers)
 # --------------------------------------------------------------------------- #
 def _search_crossref(query: str, max_results: int) -> list[SearchResult]:
@@ -281,26 +388,62 @@ def search_web(query: str, max_results: int = 5,
     all_results: list[SearchResult] = []
     backends_used: list[str] = []
     seen_links: set[str] = set()
+    # Cache check (300s TTL)
+    import time
+    cache_key = query.lower().strip()
+    cached = _search_cache.get(cache_key)
+    if cached:
+        result_text, cached_time = cached
+        if time.time() - cached_time < 300:
+            return result_text
+    is_repo_query = any(k in query.lower() for k in ["github", "repo", "reverse engineering", "trending"])
 
-    # DuckDuckGo (always available)
-    ddg_results = _search_duckduckgo(query, max_results)
-    if ddg_results:
-        all_results.extend(ddg_results)
-        backends_used.append("duckduckgo")
-        seen_links.update(r.link for r in ddg_results)
+    # Priority order: Brave (fast, rich) -> SearXNG (meta) -> DuckDuckGo (site:github.com for repos) -> GitHub API -> Headless (live) -> Wikipedia -> Crossref (academic only)
+    # Brave first (fast free tier, best snippets)
+    brave_results = _search_brave(query, max_results)
+    if brave_results:
+        for r in brave_results:
+            if r.link not in seen_links:
+                all_results.append(r)
+                seen_links.add(r.link)
+        backends_used.append("brave")
 
-    # SearXNG (fill remaining slots)
+    # SearXNG (meta-aggregator)
+    remaining = max_results - len(all_results)
+    sx_results = _search_searxng(query, remaining) if remaining > 0 else None
+    if sx_results:
+        for r in sx_results:
+            if r.link not in seen_links:
+                all_results.append(r)
+                seen_links.add(r.link)
+        backends_used.append("searxng")
+
+    # DuckDuckGo (fill remaining, with site:github.com for repo queries)
     remaining = max_results - len(all_results)
     if remaining > 0:
-        sx_results = _search_searxng(query, remaining)
-        if sx_results:
-            for r in sx_results:
+        ddg_query = query
+        if is_repo_query:
+            ddg_query = f"{query} site:github.com"
+        ddg_results = _search_duckduckgo(ddg_query, remaining)
+        if ddg_results:
+            for r in ddg_results:
                 if r.link not in seen_links:
                     all_results.append(r)
                     seen_links.add(r.link)
-            backends_used.append("searxng")
+            backends_used.append("duckduckgo")
 
-    # Wikipedia (fill remaining slots)
+    # GitHub API (repo/code queries — direct results)
+    remaining = max_results - len(all_results)
+    if is_repo_query and remaining > 0:
+        gh_results = _search_github(query, remaining)
+        if gh_results:
+            for r in gh_results:
+                if r.link not in seen_links:
+                    all_results.append(r)
+                    seen_links.add(r.link)
+            backends_used.append("github")
+
+    # Wikipedia (known facts)
     remaining = max_results - len(all_results)
     if remaining > 0:
         wiki_results = _search_wikipedia(query, remaining)
@@ -311,16 +454,55 @@ def search_web(query: str, max_results: int = 5,
                     seen_links.add(r.link)
             backends_used.append("wikipedia")
 
-    # Crossref (academic, fill remaining slots)
+    # Headless browser (live page extraction — best for current/live info)
     remaining = max_results - len(all_results)
     if remaining > 0:
-        cr_results = _search_crossref(query, remaining)
-        if cr_results:
-            for r in cr_results:
+        headless_results = _search_headless(query, remaining)
+        if headless_results:
+            for r in headless_results:
                 if r.link not in seen_links:
                     all_results.append(r)
                     seen_links.add(r.link)
-            backends_used.append("crossref")
+            backends_used.append("headless")
+
+    # Crossref (academic papers only — skip for repo/viral/search queries to avoid noise)
+    remaining = max_results - len(all_results)
+    if remaining > 0 and not is_repo_query:
+        # Only use Crossref for clearly academic queries
+        is_academic = any(k in query.lower() for k in ["study", "paper", "research", "doi", "academic", "journal", "publication"])
+        if is_academic:
+            cr_results = _search_crossref(query, remaining)
+            if cr_results:
+                for r in cr_results:
+                    if r.link not in seen_links:
+                        all_results.append(r)
+                        seen_links.add(r.link)
+                backends_used.append("crossref")
+
+    # Fallback: try original query with site:github.com for repo queries, then shorter keywords
+    if not all_results:
+        # Try direct github-targeted DDG search first
+        ddg_retry = _search_duckduckgo(f"{query} site:github.com", max_results)
+        if ddg_retry:
+            for r in ddg_retry:
+                if r.link not in seen_links:
+                    all_results.append(r)
+                    seen_links.add(r.link)
+            backends_used.append("duckduckgo")
+        else:
+            # Last resort: single keywords
+            keywords = [w for w in query.split() if len(w) > 2 and w.lower() not in ["the", "and", "for", "now", "what", "is", "that"]]
+            for kw in keywords[:2]:
+                for backend_fn in [_search_duckduckgo, _search_github, _search_searxng, _search_wikipedia]:
+                    retry = backend_fn(kw, max_results)
+                    if retry:
+                        for r in retry:
+                            if r.link not in seen_links:
+                                all_results.append(r)
+                                seen_links.add(r.link)
+                        backends_used.append(r.source)
+                if all_results:
+                    break
 
     # Truncate to max_results
     all_results = all_results[:max_results]
@@ -376,7 +558,10 @@ def search_web(query: str, max_results: int = 5,
     ))
     lines.append("RAW_JSON_END")
 
-    return "\n".join(lines)
+    result_text = "\n".join(lines)
+    # Cache result (300s TTL)
+    _search_cache[cache_key] = (result_text, time.time())
+    return result_text
 
 
 # --------------------------------------------------------------------------- #

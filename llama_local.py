@@ -34,7 +34,7 @@ class LMStudioModel:
         self,
         base_url: str = "http://127.0.0.1:1234",
         model_name: str = "local-model",
-        timeout: int = 60,
+        timeout: int = 120,
     ):
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
@@ -86,7 +86,13 @@ class LMStudioModel:
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]
         except Exception as exc:
-            raise ConnectionError(f"LM Studio request failed: {exc}")
+            msg = str(exc)
+            if "timed out" in msg or "timeout" in msg:
+                raise ConnectionError(
+                    f"LM Studio at {self.base_url} timed out. "
+                    "Is LM Studio running with a loaded model and server started?"
+                ) from exc
+            raise ConnectionError(f"LM Studio request failed: {exc}") from exc
 
     def complete(self, prompt: str, temperature: float = 0.2, max_tokens: int = 2048) -> str:
         return self.chat(
