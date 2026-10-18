@@ -398,41 +398,43 @@ def extract_code_block(text: str) -> Optional[str]:
     return None
 
 
-def _is_raw_tool_json(text: str) -> bool:
-    """Detect if the model output is raw JSON tool-call instead of natural language."""
+def _extract_raw_tool_json(text: str) -> str | None:
+    """Extract raw JSON tool-call from text, handling markdown fences.
+    Searches for JSON tool-call patterns anywhere in the text."""
     stripped = text.strip()
     # Strip markdown code fences
     if stripped.startswith("```"):
         lines = stripped.split("\n")
         if len(lines) > 2:
             stripped = "\n".join(lines[1:-1]).strip()
-    if not stripped.startswith("{"):
-        return False
-    try:
-        import json as _json
-        data = _json.loads(stripped)
-        return isinstance(data, dict) and "name" in data and "arguments" in data
-    except Exception:
-        return False
-
-
-def _extract_raw_tool_json(text: str) -> str | None:
-    """Extract raw JSON tool-call from text, handling markdown fences."""
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.split("\n")
-        if len(lines) > 2:
-            stripped = "\n".join(lines[1:-1]).strip()
-    if not stripped.startswith("{"):
-        return None
-    try:
-        import json as _json
-        data = _json.loads(stripped)
-        if isinstance(data, dict) and "name" in data and "arguments" in data:
-            return stripped
-    except Exception:
-        pass
+    # Try to find JSON object in the text
+    import json as _json
+    import re
+    # Look for JSON objects that look like tool calls
+    # Pattern: { ... "name": "...", "arguments": {...} ... }
+    json_pattern = r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{.*?\}\s*\}'
+    match = re.search(json_pattern, stripped, re.DOTALL)
+    if match:
+        try:
+            data = _json.loads(match.group())
+            if isinstance(data, dict) and "name" in data and "arguments" in data:
+                return match.group()
+        except Exception:
+            pass
+    # Fallback: try parsing the whole stripped text as JSON
+    if stripped.startswith("{"):
+        try:
+            data = _json.loads(stripped)
+            if isinstance(data, dict) and "name" in data and "arguments" in data:
+                return stripped
+        except Exception:
+            pass
     return None
+
+
+def _is_raw_tool_json(text: str) -> bool:
+    """Detect if the model output contains raw JSON tool-call instead of pure natural language."""
+    return _extract_raw_tool_json(text) is not None
 
 
 def _execute_raw_tool_call(tool_call_dict: dict) -> str:
