@@ -847,7 +847,9 @@ class LogicTreeSolver:
             if failure:
                 missing.append(failure)
 
-        final_answer = self._compose_final_answer(status, resolved_steps, sources)
+        final_answer = self._compose_final_answer(
+            status, resolved_steps, sources, steps
+        )
 
         return {
             "status": status,
@@ -866,8 +868,16 @@ class LogicTreeSolver:
         status: str,
         resolved_steps: list[dict],
         sources: list[dict],
+        steps: Optional[list[dict]] = None,
     ) -> str:
-        """Build the deterministic answer string (no LLM)."""
+        """Build the deterministic answer string (no LLM).
+
+        Every displayed answer is attributed to the hop that produced it.
+        When the question's own (final) hop produced no answer, only an
+        explicitly labelled intermediate result is shown -- an earlier hop's
+        answer is never passed off as the answer to the full question.
+        """
+        all_steps = list(steps) if steps is not None else list(resolved_steps)
         if status == "INSUFFICIENT_DATA" or not resolved_steps:
             return (
                 "No verified answer could be established from live sources. "
@@ -875,9 +885,66 @@ class LogicTreeSolver:
                 "been inferred or filled in."
             )
         last = resolved_steps[-1]
-        answer = last.get("answer") or ""
+        question_step = all_steps[-1] if all_steps else None
+        answered_question = bool(
+            question_step and question_step.get("status") == "resolved"
+        )
+        roots = [s for s in all_steps if not s.get("depends_on")]
+        lines: list[str] = []
+        if status == "CONFLICT":
+            lines.append("Conflicting evidence -- no single answer is forced.")
+            lines.append("Candidates (each attributed to its hop):")
+            for step in resolved_steps:
+                lines.append(
+                    f"- {step.get('answer') or ''}  "
+                    f"(from hop '{step['id']}' -- {step['hop_type']})"
+                )
+        elif answered_question and len(roots) > 1:
+            # Co-equal sub-questions ("Who founded Tesla and who is the CEO
+            # of SpaceX?"): one answer line per resolved hop, each labelled.
+            lines.append("Answers (one per sub-question):")
+            for step in all_steps:
+                if step.get("status") != "resolved":
+                    continue
+                lines.append(
+                    f"- {step.get('answer') or ''}  "
+                    f"(from hop '{step['id']}' -- {step['hop_type']}: "
+                    f"{step.get('query_text')})"
+                )
+        elif answered_question:
+            answer = question_step.get("answer") or ""
+            lines.append(f"Answer: {answer}")
+            lines.append(
+                f"(from hop '{question_step['id']}' -- {question_step['hop_type']})"
+            )
+            earlier = [s for s in resolved_steps if s is not question_step]
+            if earlier:
+                lines.append("Derivation:")
+                for step in earlier:
+                    lines.append(
+                        f"- hop '{step['id']}' ({step['hop_type']}): "
+                        f"{step.get('answer') or ''}"
+                    )
+        else:
+            # The question's own hop is unresolved: only intermediate work
+            # exists, and it must be labelled as such (never as "Answer:" --
+            # that previously showed e.g. the creator of WhatsApp when the
+            # question asked for the CEO).
+            answer = last.get("answer") or ""
+            lines.append(
+                "Intermediate result only -- not the answer to the full "
+                f"question: {answer}"
+            )
+            lines.append(
+                f"(from hop '{last['id']}' -- {last['hop_type']})"
+            )
+            if question_step is not None:
+                lines.append(
+                    f"The final hop (hop '{question_step['id']}' -- "
+                    f"{question_step['hop_type']}) produced no extractable "
+                    "answer, so the question itself is still open."
+                )
         cited = [s for s in sources if s.get("url")]
-        lines = [f"Answer: {answer}"]
         if cited:
             lines.append("Sources:")
             for index, source in enumerate(cited, 1):
