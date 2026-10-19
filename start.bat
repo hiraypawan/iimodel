@@ -8,12 +8,14 @@ echo.
 echo Server: http://127.0.0.1:5000
 echo.
 
-if not exist ".venv\Scripts\python.exe" (
-    echo ERROR: Virtual environment not found at .venv\
-    echo Create it first:
-    echo   py -3.11 -m venv .venv
-    echo   .venv\Scripts\python.exe -m pip install -r requirements.txt
-    echo Or run INSTALL_AND_RUN.bat, or: python bootstrap.py
+if exist ".venv311\Scripts\python.exe" (
+    set PYTHON=.venv311\Scripts\python.exe
+) else if exist ".venv\Scripts\python.exe" (
+    set PYTHON=.venv\Scripts\python.exe
+) else (
+    echo ERROR: No virtual environment found. Create .venv311:
+    echo   py -3.11 -m venv .venv311
+    echo   .venv311\Scripts\python.exe -m pip install -r requirements.txt
     pause
     exit /b 1
 )
@@ -26,7 +28,7 @@ if not exist "models\qwen2.5-1.5b-instruct-q4_0.gguf" (
 
 echo Starting II v3.0 server...
 echo.
-.venv\Scripts\python.exe app.py
+%PYTHON% app.py
 echo.
 echo Server stopped. Press any key to close...
 pause
