@@ -3,8 +3,8 @@ main.py — Command-line entry point for II v3.0.
 
 The Pure II commands (``ask``, ``solve``, ``interview``, ``brainstorm``,
 ``hypothesize``, ``memory``) run the deterministic pipeline: live cited
-sources, graph traversal and DAG orchestration.  The local model, when one is
-configured, is only the renderer.
+sources, graph traversal and DAG orchestration. No GGUF or external model
+server is required.
 
 The remaining commands expose the earlier helpers (repository graph, SMT,
 bounded synthesis, the experimental blackboard, repository ingestion).

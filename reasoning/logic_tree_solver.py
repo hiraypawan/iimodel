@@ -21,6 +21,7 @@ Status vocabulary (see the project status taxonomy):
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional
 
@@ -643,27 +644,55 @@ Fetcher = Callable[[str, int], list[dict]]
 
 
 def _default_fetcher(query: str, max_results: int) -> list[dict]:
-    """Default live fetcher: search, then download the top pages."""
+    """Search sources, using snippets first and fetching missing text in parallel.
+
+    Search-result snippets are retrieved source text.  The original result URL
+    is kept as the citation; publishers are fetched only when no usable snippet
+    was returned.
+    """
     from ingestion import ii_web
 
-    pages: list[dict] = []
     try:
         response = ii_web.search_results(query, max_results=max_results)
     except Exception:
-        return pages
-    for result in response.results[:max_results]:
-        try:
-            page = ii_web.fetch_page_text(result.link, timeout=15)
-        except Exception:
-            continue
-        if not page.get("text"):
-            continue
-        pages.append({
+        return []
+    results = list(response.results[:max_results])
+    if not results:
+        return []
+
+    def clean_snippet(result) -> str:
+        text = re.sub(r"<[^>]+>", " ", result.snippet or "")
+        return " ".join(text.split()).strip()
+
+    def fetch(result) -> dict | None:
+        # Search snippets are already retrieved source text and usually carry
+        # enough evidence for extraction.  Prefer them to a second network
+        # round-trip; fetch the page only when the provider returned no usable
+        # snippet.  This removes N sequential page timeouts from every answer.
+        text = clean_snippet(result)
+        retrieval = "search_snippet"
+        if len(text) < 25:
+            try:
+                page = ii_web.fetch_page_text(
+                    result.link,
+                    timeout=max(1, int(ii_web.WEB_TIMEOUT)),
+                )
+            except Exception:
+                page = {}
+            text = (page.get("text") or "").strip()
+            retrieval = "page"
+        if not text:
+            return None
+        return {
             "url": result.link,
             "title": result.title,
-            "text": page["text"],
-        })
-    return pages
+            "text": text,
+            "retrieval": retrieval,
+        }
+
+    with ThreadPoolExecutor(max_workers=min(5, len(results))) as executor:
+        fetched = list(executor.map(fetch, results))
+    return [page for page in fetched if page is not None]
 
 
 class LogicTreeSolver:
@@ -827,7 +856,9 @@ class LogicTreeSolver:
             status = "INSUFFICIENT_DATA"
         elif conflicts:
             status = "CONFLICT"
-        elif len(resolved_steps) >= 1 and len(domains) >= 1:
+        elif len(resolved_steps) == len(steps) and len(domains) >= 1:
+            # One supporting domain is enough for a fully resolved chain, but
+            # never label an intermediate hop VERIFIED when a later hop failed.
             status = "VERIFIED"
         else:
             status = "PARTIAL"

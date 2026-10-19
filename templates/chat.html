@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>II — Local AI Agent</title>
+<title>II — Pure Internet Intelligence</title>
 <style>
   :root {
     --bg: #0b0c10;
@@ -39,7 +39,40 @@
   .sub { font-size: 11px; color: var(--muted); margin-left: 6px; }
   #backendStatus { margin-left: auto; font-size: 11px; color: var(--muted); }
   #backendStatus.ready { color: var(--accent); }
-  #backendStatus.demo { color: #ffcc66; }
+  #backendStatus.error { color: #ffcc66; }
+  .settings-btn {
+    border: 1px solid var(--border); background: var(--input); color: var(--text);
+    border-radius: 7px; padding: 5px 9px; cursor: pointer; font-size: 12px;
+  }
+  .settings-btn:hover { border-color: var(--accent); color: var(--accent); }
+  dialog {
+    width: min(520px, calc(100vw - 32px)); border: 1px solid var(--border);
+    border-radius: 12px; background: var(--panel); color: var(--text);
+    padding: 20px; margin: auto;
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.72); }
+  dialog h2 { font-size: 17px; margin-bottom: 6px; }
+  dialog p { color: var(--muted); font-size: 12px; line-height: 1.5; margin-bottom: 16px; }
+  .settings-field { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+  .settings-field label { font-size: 12px; color: var(--muted); }
+  .settings-field input, .settings-field select {
+    width: 100%; background: var(--input); border: 1px solid var(--border);
+    border-radius: 7px; color: var(--text); padding: 9px 10px; outline: none;
+  }
+  .settings-field input:focus, .settings-field select:focus { border-color: var(--accent); }
+  .model-picker { display: flex; gap: 8px; }
+  .model-picker input { flex: 1; }
+  .model-picker button { white-space: nowrap; padding: 0 12px; }
+  .direct-option {
+    display: flex; align-items: flex-start; gap: 9px; color: var(--muted);
+    font-size: 11px; line-height: 1.4; margin-top: 10px;
+  }
+  .direct-option input { width: auto; margin-top: 2px; accent-color: var(--accent); }
+  .settings-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .settings-actions button { border-radius: 7px; padding: 8px 13px; cursor: pointer; }
+  .secondary { border: 1px solid var(--border); color: var(--text); background: var(--input); }
+  .primary { border: none; color: #000; background: var(--accent); font-weight: 700; }
+  .provider-note { color: #ffcc66; min-height: 18px; font-size: 11px; }
 
   main { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
   .msg { max-width: 720px; display: flex; flex-direction: column; gap: 6px; }
@@ -56,6 +89,15 @@
   .msg.user .bubble { background: var(--user-bg); border: 1px solid var(--border); color: var(--text); }
   .msg.ii .bubble { background: var(--ii-bg); border: 1px solid var(--border); color: var(--text); }
   .meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .result-details {
+    max-width: 720px; font-size: 11px; color: var(--muted);
+    background: var(--ii-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 11px;
+  }
+  .result-details summary { cursor: pointer; color: var(--accent); }
+  .result-details ul { margin: 7px 0 0 18px; }
+  .result-details li { margin: 4px 0; overflow-wrap: anywhere; }
+  .result-details a { color: #8ab4f8; }
 
   code {
     font-family: "Consolas", "Monaco", "Courier New", monospace;
@@ -137,12 +179,63 @@
 <body>
 <header>
   <div class="dot"></div>
-  <h1>II<span class="sub">Local tool-augmented agent prototype</span></h1>
-  <span id="backendStatus" class="demo">Checking model backend…</span>
+  <h1>II<span class="sub">Pure Internet Intelligence</span></h1>
+  <span id="backendStatus">Starting II…</span>
+  <button class="settings-btn" id="settingsOpen" type="button">BYOK settings</button>
 </header>
 
+<dialog id="settingsDialog">
+  <h2>OpenAI-compatible BYOK</h2>
+  <p>
+    Choose OpenRouter, OpenCode Zen, or another preset — or add any custom
+    OpenAI-compatible endpoint. The model handles conversation and can choose
+    II's tools. Keys stay in this tab's session storage. Normally II forwards
+    the key as bearer authentication; browser-direct mode sends it straight to
+    the selected provider. Free tiers, quotas, and model availability can change.
+  </p>
+  <div class="settings-field">
+    <label for="iiApiKey">II server API key (only if the server uses II_API_KEY)</label>
+    <input id="iiApiKey" type="password" placeholder="Stored for this tab only" autocomplete="off">
+  </div>
+  <div class="settings-field">
+    <label for="providerPreset">Provider</label>
+    <select id="providerPreset">
+      <option value="custom">Custom OpenAI-compatible endpoint</option>
+    </select>
+  </div>
+  <div class="settings-field">
+    <label for="providerUrl">Provider API base URL or full chat-completions URL</label>
+    <input id="providerUrl" type="url" placeholder="https://api.example.com/v1">
+  </div>
+  <div class="settings-field">
+    <label for="providerModel">Model name</label>
+    <div class="model-picker">
+      <input id="providerModel" list="providerModels" type="text" placeholder="provider/model-name" autocomplete="off">
+      <button class="secondary" id="modelsLoad" type="button">Load models</button>
+    </div>
+    <datalist id="providerModels"></datalist>
+  </div>
+  <div class="settings-field">
+    <label for="providerKey" id="providerKeyLabel">Provider API key (required for presets; optional only for custom no-auth endpoints)</label>
+    <input id="providerKey" type="password" placeholder="Paste the selected provider's API key" autocomplete="off">
+  </div>
+  <label class="direct-option" for="providerDirect">
+    <input id="providerDirect" type="checkbox">
+    <span>Connect to the provider directly from this browser. Use this on hosted
+    previews where the II server cannot reach provider APIs. The provider must
+    allow browser CORS; II tools still run on this server.</span>
+  </label>
+  <div class="provider-note" id="providerNote"></div>
+  <div class="settings-actions">
+    <button class="secondary" id="providerClear" type="button">Clear provider</button>
+    <button class="secondary" id="providerTest" type="button">Test model</button>
+    <button class="secondary" id="settingsClose" type="button">Cancel</button>
+    <button class="primary" id="providerSave" type="button">Save settings</button>
+  </div>
+</dialog>
+
 <main id="chat">
-  <div class="empty-state" id="empty">Checking model status. Search and URL fetch use the internet; code execution runs locally and is not sandboxed.</div>
+  <div class="empty-state" id="empty">Starting II's internet and tool pipeline…</div>
 </main>
 
 <footer>
@@ -156,32 +249,756 @@ const input = document.getElementById('input');
 const send = document.getElementById('send');
 const empty = document.getElementById('empty');
 const backendStatus = document.getElementById('backendStatus');
+const settingsDialog = document.getElementById('settingsDialog');
+const iiApiKey = document.getElementById('iiApiKey');
+const providerPreset = document.getElementById('providerPreset');
+const providerUrl = document.getElementById('providerUrl');
+const providerModel = document.getElementById('providerModel');
+const providerModels = document.getElementById('providerModels');
+const modelsLoad = document.getElementById('modelsLoad');
+const providerTest = document.getElementById('providerTest');
+const providerKey = document.getElementById('providerKey');
+const providerKeyLabel = document.getElementById('providerKeyLabel');
+const providerDirect = document.getElementById('providerDirect');
+const providerNote = document.getElementById('providerNote');
+const conversationHistory = [];
+const PROVIDER_PRESETS = {{ provider_presets|tojson }};
+let serverStatus = null;
 
-const API_KEY = {{ api_key|tojson }};
-const apiHeaders = {'Content-Type': 'application/json'};
-if (API_KEY) { apiHeaders['X-II-API-Key'] = API_KEY; }
+function requestHeaders(){
+  const headers = {'Content-Type': 'application/json'};
+  const key = sessionStorage.getItem('ii.api.key') || '';
+  if (key) headers['X-II-API-Key'] = key;
+  return headers;
+}
 
-fetch('/api/status', {headers: apiHeaders}).then(r => r.json()).then(status => {
-  if (status.chat_ready) {
-    backendStatus.textContent = `Model backend: ${status.backend} (renderer only)`;
-    backendStatus.className = 'ready';
-    empty.textContent = 'II runs the deterministic pipeline: live cited sources, graph traversal and DAG orchestration. The local model is the renderer only. Search and URL fetch use the internet; code execution runs with the current user\u2019s permissions and is not sandboxed.';
+function providerConfig(){
+  const api_url = (sessionStorage.getItem('ii.provider.url') || '').trim();
+  const model = (sessionStorage.getItem('ii.provider.model') || '').trim();
+  const api_key = sessionStorage.getItem('ii.provider.key') || '';
+  return api_url && model ? {api_url, model, api_key} : null;
+}
+
+function presetForApiUrl(apiUrl){
+  if (!apiUrl) return null;
+  try {
+    const target = completionUrl(apiUrl);
+    return PROVIDER_PRESETS.find(preset => completionUrl(preset.api_url) === target) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function providerCredentialError(provider){
+  const preset = provider && presetForApiUrl(provider.api_url);
+  if (!preset || String(provider.api_key || '').trim()) return '';
+  return `${preset.name} requires its own API key. A free-labelled model is free-tier, not anonymous; signing in to the provider website does not send that login to II.`;
+}
+
+function updateProviderKeyHelp(){
+  const preset = PROVIDER_PRESETS.find(item => item.id === providerPreset.value)
+    || presetForApiUrl(providerUrl.value.trim());
+  if (preset) {
+    providerKeyLabel.textContent = `${preset.name} API key (required, including for free-labelled models)`;
+    providerKey.placeholder = `Paste your ${preset.name} API key`;
   } else {
-    backendStatus.textContent = 'No model connected \u2014 deterministic rendering only';
-    backendStatus.title = status.setup_message || 'Connect a model backend.';
-    backendStatus.className = 'demo';
-    empty.textContent = 'II still answers with the deterministic pipeline and cites its sources; without a model backend the results are rendered as structured text instead of prose. Connect LM Studio or provide a GGUF model for natural-language rendering.';
+    providerKeyLabel.textContent = 'Provider API key (optional only if this custom endpoint explicitly supports anonymous access)';
+    providerKey.placeholder = 'Paste the provider key, or leave blank only for a no-auth endpoint';
   }
-  const stages = status.pipeline_stages || {};
-  const active = Object.entries(stages).filter(([, s]) => s.active).map(([name]) => name);
-  if (active.length) {
-    backendStatus.title = 'Active pipeline stages: ' + active.join(', ');
+}
+
+const MODEL_ACCESS_CACHE_KEY = 'ii.provider.blocked-models';
+const MODEL_ACCESS_TTL_MS = 60 * 60 * 1000;
+
+function providerEndpointKey(apiUrl){
+  try { return completionUrl(apiUrl); } catch (_) { return String(apiUrl || '').trim(); }
+}
+
+function blockedModelEntries(){
+  let entries = [];
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(MODEL_ACCESS_CACHE_KEY) || '[]');
+    if (Array.isArray(parsed)) entries = parsed;
+  } catch (_) { /* Ignore malformed tab-local state. */ }
+  const now = Date.now();
+  entries = entries.filter(entry => entry && typeof entry.endpoint === 'string'
+    && typeof entry.model === 'string' && Number(entry.until) > now).slice(-100);
+  try { sessionStorage.setItem(MODEL_ACCESS_CACHE_KEY, JSON.stringify(entries)); } catch (_) { /* optional cache */ }
+  return entries;
+}
+
+function modelIsBlocked(provider, model){
+  const endpoint = providerEndpointKey(provider && provider.api_url);
+  return blockedModelEntries().some(entry => entry.endpoint === endpoint && entry.model === model);
+}
+
+function blockModelForTab(provider){
+  if (!provider || !provider.api_url || !provider.model) return;
+  const endpoint = providerEndpointKey(provider.api_url);
+  const entries = blockedModelEntries().filter(entry => !(entry.endpoint === endpoint && entry.model === provider.model));
+  entries.push({endpoint, model: provider.model, until: Date.now() + MODEL_ACCESS_TTL_MS});
+  try { sessionStorage.setItem(MODEL_ACCESS_CACHE_KEY, JSON.stringify(entries.slice(-100))); } catch (_) { /* optional cache */ }
+}
+
+function clearBlockedModels(apiUrl){
+  const endpoint = providerEndpointKey(apiUrl);
+  const entries = blockedModelEntries().filter(entry => entry.endpoint !== endpoint);
+  try { sessionStorage.setItem(MODEL_ACCESS_CACHE_KEY, JSON.stringify(entries)); } catch (_) { /* optional cache */ }
+}
+
+const VERIFIED_PROVIDER_KEY = 'ii.provider.verified';
+function verifiedProviderMatches(provider){
+  if (!provider) return false;
+  try {
+    const value = JSON.parse(sessionStorage.getItem(VERIFIED_PROVIDER_KEY) || 'null');
+    return value && value.endpoint === providerEndpointKey(provider.api_url)
+      && value.model === provider.model && Number(value.until) > Date.now();
+  } catch (_) { return false; }
+}
+function markProviderVerified(provider){
+  if (!provider) return;
+  const value = {endpoint: providerEndpointKey(provider.api_url), model: provider.model, until: Date.now() + MODEL_ACCESS_TTL_MS};
+  try { sessionStorage.setItem(VERIFIED_PROVIDER_KEY, JSON.stringify(value)); } catch (_) { /* optional status */ }
+}
+function clearProviderVerification(){
+  try { sessionStorage.removeItem(VERIFIED_PROVIDER_KEY); } catch (_) { /* optional status */ }
+}
+
+async function parseJsonResponse(response, label){
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (_) {
+    const preview = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+    const error = new Error(`${label} returned HTTP ${response.status} with a non-JSON response${preview ? `: ${preview}` : ''}`);
+    error.status = response.status;
+    throw error;
   }
-}).catch(() => {
-  backendStatus.textContent = 'Backend status unavailable';
-  backendStatus.className = 'demo';
-  empty.textContent = 'Model status could not be checked. Connect a local model backend before expecting AI-generated answers.';
+  if (!response.ok || data.error) {
+    const raw = data.error && typeof data.error === 'object'
+      ? (data.error.message || JSON.stringify(data.error))
+      : (data.error || `${label} returned HTTP ${response.status}`);
+    const error = new Error(String(raw));
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+}
+
+function providerHeaders(provider){
+  const headers = {'Accept': 'application/json', 'Content-Type': 'application/json'};
+  if (provider.api_key) headers.Authorization = `Bearer ${provider.api_key}`;
+  const preset = presetForApiUrl(provider.api_url);
+  if (preset && preset.id === 'openrouter') {
+    // OpenRouter's documented attribution headers identify II truthfully; they
+    // do not impersonate one of the provider's separately approved apps.
+    headers['HTTP-Referer'] = 'https://github.com/hiraypawan/iimodel';
+    headers['X-Title'] = 'II - Pure Internet Intelligence';
+  }
+  return headers;
+}
+
+function redactProviderError(error, provider){
+  let message = String(error && error.message ? error.message : error || 'unknown error');
+  if (provider && provider.api_key) message = message.split(provider.api_key).join('[REDACTED]');
+  return message.slice(0, 500);
+}
+
+function providerFailureKind(error, provider){
+  const detail = redactProviderError(error, provider);
+  const status = Number(error && error.status) || 0;
+  if (/only available (?:on|to|for|via)|not available (?:on|to|for|via) (?:this|your)|requires model-training opt-in|not opted in/i.test(detail)) return 'model_access';
+  if (/insufficient[_ ](?:user[_ ])?quota|insufficient (?:credit|balance)|deposit required|billing|payment required/i.test(detail) || status === 402) return 'credits';
+  if (status === 429 || /rate.?limit|too many requests/i.test(detail)) return 'rate_limit';
+  if (status === 401 || /\b(cookie auth|unauthori[sz]ed|invalid (?:api )?key|authentication failed|missing (?:api )?key)\b/i.test(detail)) return 'authentication';
+  if (status === 403) return 'access_policy';
+  if (status === 404 || /\bmodel (?:was )?not found\b|\bunknown model\b/i.test(detail)) return 'model_not_found';
+  return 'provider_error';
+}
+
+function providerFailureMessage(error, provider){
+  const detail = redactProviderError(error, provider);
+  const preset = provider && presetForApiUrl(provider.api_url);
+  const name = preset ? preset.name : 'The provider';
+  const kind = providerFailureKind(error, provider);
+  const model = provider && provider.model ? ` “${provider.model}”` : '';
+  if (kind === 'model_access') {
+    return `${name} does not permit model${model} from this client/API route. Choose a different model in BYOK settings. This is a provider model-access restriction, not an API-key failure. Provider detail: ${detail}`;
+  }
+  if (kind === 'authentication') {
+    return `${name} rejected the API credentials. Paste a valid provider API key in BYOK settings; a free-labelled model still requires authentication. Provider detail: ${detail}`;
+  }
+  if (kind === 'credits') return `${name} reports insufficient credits, quota, or billing access. Provider detail: ${detail}`;
+  if (kind === 'rate_limit') return `${name} rate-limited this request. Retry later or choose another eligible model. Provider detail: ${detail}`;
+  if (kind === 'access_policy') return `${name} refused this request under a provider, account, or model-access policy (HTTP 403). The key is not necessarily invalid. Provider detail: ${detail}`;
+  if (kind === 'model_not_found') return `${name} does not recognize model${model}. Reload the catalog or choose another model. Provider detail: ${detail}`;
+  return detail;
+}
+
+function providerNextStep(kind){
+  if (kind === 'model_access' || kind === 'model_not_found') return 'Choose and test a different model in BYOK settings';
+  if (kind === 'authentication') return 'Check the provider API key in BYOK settings';
+  if (kind === 'rate_limit') return 'Provider quota is exhausted; wait for its reset, add credits, or switch provider/key. Repeated retries will not help.';
+  if (kind === 'credits') return 'Add provider credits or switch to another provider/key; II cannot bypass provider billing limits.';
+  if (kind === 'access_policy') return 'Review the provider account/model policy or choose another eligible model.';
+  return 'Check provider key, model, endpoint, CORS, and server connectivity';
+}
+
+function completionUrl(apiUrl){
+  const url = new URL(apiUrl);
+  let path = url.pathname.replace(/\/+$/, '');
+  if (!path.endsWith('/chat/completions')) {
+    path = path ? `${path}/chat/completions` : '/v1/chat/completions';
+  }
+  url.pathname = path;
+  url.hash = '';
+  return url.href;
+}
+
+function catalogUrl(apiUrl, override){
+  if (override) return new URL(override).href;
+  const url = new URL(completionUrl(apiUrl));
+  url.pathname = url.pathname.replace(/\/chat\/completions\/?$/, '/models');
+  return url.href;
+}
+
+function modelIds(payload){
+  const entries = Array.isArray(payload)
+    ? payload
+    : (Array.isArray(payload.data) ? payload.data : (Array.isArray(payload.models) ? payload.models : []));
+  const seen = new Set();
+  const ids = [];
+  entries.forEach(entry => {
+    const value = typeof entry === 'string' ? entry : (entry && (entry.id || entry.model || entry.name));
+    if (typeof value === 'string' && value.trim() && !seen.has(value.trim()) && ids.length < 500) {
+      seen.add(value.trim()); ids.push(value.trim());
+    }
+  });
+  return ids;
+}
+
+async function loadModelsDirect(provider, modelsUrl){
+  let response;
+  try {
+    response = await fetch(catalogUrl(provider.api_url, modelsUrl), {
+      method: 'GET', headers: providerHeaders(provider), redirect: 'error'
+    });
+  } catch (error) {
+    throw new Error(`Direct browser connection was blocked by the network or provider CORS: ${error.message}`);
+  }
+  const data = await parseJsonResponse(response, 'Provider model catalog');
+  const models = modelIds(data);
+  if (!models.length) throw new Error('Provider returned no compatible model IDs.');
+  return {models, count: models.length, transport: 'browser-direct'};
+}
+
+function localConversationFastPath(prompt){
+  const text = String(prompt || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return /^(?:(?:h+i+|he+l+o+|hey+|yo+|namaste)(?:\s+(?:ii|there))?|good\s+(?:morning|afternoon|evening))[!.?]*$/.test(text)
+    || /^(?:thanks|thank\s+you|thx|ty)(?:\s+(?:ii|so\s+much))?[!.?]*$/.test(text)
+    || /^(?:who|what)\s+are\s+you[!.?]*$/.test(text)
+    || /^(?:(?:what|which)\s+can\s+you\s+do|help|help\s+me|show\s+me\s+what\s+you\s+can\s+do)[!.?]*$/.test(text)
+    || /^(?:how\s+are\s+you|how(?:'|’)s\s+it\s+going)[!.?]*$/.test(text)
+    || /^(?:bye+|goodbye|see\s+you|later)[!.?]*$/.test(text);
+}
+
+function promptNeedsTools(prompt){
+  const text = String(prompt || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (/^(?:(?:who|what) are you|what is your name|how are you)[?.!]*$/.test(text)) return false;
+  if (/https?:\/\//.test(text)) return true;
+  if (/\b(now|current|currently|today|latest|recent|news|weather|price|score|time in|look up|search|research|source|citation|verify)\b/.test(text)) return true;
+  return /^(who|when|where|which|how (?:many|much|long|old|far|tall)|what (?:is|are|was|were)(?! your\b))\b/.test(text);
+}
+
+let directRuntimePromise = null;
+function directRuntime(){
+  if (!directRuntimePromise) {
+    directRuntimePromise = fetch('/api/hybrid/tools', {headers: requestHeaders()})
+      .then(response => parseJsonResponse(response, 'II tool schema'))
+      .catch(error => { directRuntimePromise = null; throw error; });
+  }
+  return directRuntimePromise;
+}
+
+function messageText(content){
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.map(item => item && typeof item.text === 'string' ? item.text : '').join('');
+  return '';
+}
+
+function directResult(content, trace, sources, nativeTools, pipeline='hybrid:browser-direct'){
+  const failed = trace.filter(item => !item.ok);
+  const succeeded = trace.filter(item => item.ok);
+  let response = content;
+  let status = trace.length ? 'PARTIAL' : 'SUPPORTIVE_INFORMATION';
+  if (trace.length && !succeeded.length) {
+    response = `I could not verify or complete this request because II's tool calls failed (${[...new Set(failed.map(item => item.tool))].join(', ')}). I will not substitute an unverified factual answer.`;
+    status = 'INSUFFICIENT_DATA';
+  } else if (failed.length) {
+    response += `\n\nTool limitation: ${[...new Set(failed.map(item => item.tool))].join(', ')} did not complete successfully, so this answer may be incomplete.`;
+  }
+  const uniqueSources = [];
+  const seen = new Set();
+  sources.forEach(source => {
+    if (source && source.url && !seen.has(source.url)) { seen.add(source.url); uniqueSources.push(source); }
+  });
+  return {
+    response, status, intent: 'hybrid_chat', pipeline,
+    response_kind: trace.length ? 'tool_assisted' : 'conversation',
+    tool_trace: trace, sources: uniqueSources,
+    provider_transport: 'browser-direct', provider_tool_support: nativeTools
+  };
+}
+
+async function directProviderCompletion(provider, messages, tools, options={}){
+  let response;
+  const tokenLimit = Number.isInteger(options.max_tokens)
+    ? Math.max(1, Math.min(64, options.max_tokens))
+    : null;
+  const request = {
+    model: provider.model, messages, tools, tool_choice: 'auto',
+    temperature: 0.2, stream: false
+  };
+  if (tokenLimit !== null) request.max_tokens = tokenLimit;
+  try {
+    response = await fetch(completionUrl(provider.api_url), {
+      method: 'POST', headers: providerHeaders(provider), redirect: 'error',
+      body: JSON.stringify(request)
+    });
+  } catch (error) {
+    throw new Error(`Direct browser connection was blocked by the network or provider CORS: ${error.message}`);
+  }
+  try {
+    return {message: (await parseJsonResponse(response, 'Provider'))?.choices?.[0]?.message, nativeTools: true};
+  } catch (error) {
+    if (![400, 404, 422].includes(error.status) || !/\b(tool|tools|tool_choice|function|functions)\b/i.test(error.message)) throw error;
+    const fallbackMessages = [...messages];
+    fallbackMessages.splice(1, 0, {role: 'system', content: 'Native tool calling is unavailable. Answer ordinary conversation only; do not claim a tool ran.'});
+    let fallback;
+    try {
+      const fallbackRequest = {model: provider.model, messages: fallbackMessages, temperature: 0.2, stream: false};
+      if (tokenLimit !== null) fallbackRequest.max_tokens = tokenLimit;
+      fallback = await fetch(completionUrl(provider.api_url), {
+        method: 'POST', headers: providerHeaders(provider), redirect: 'error',
+        body: JSON.stringify(fallbackRequest)
+      });
+    } catch (networkError) {
+      throw new Error(`Direct browser connection was blocked by the network or provider CORS: ${networkError.message}`);
+    }
+    return {message: (await parseJsonResponse(fallback, 'Provider'))?.choices?.[0]?.message, nativeTools: false};
+  }
+}
+
+async function directHybridChat(prompt, provider, history){
+  const runtime = await directRuntime();
+  const messages = [{role: 'system', content: runtime.system_prompt}];
+  (Array.isArray(history) ? history.slice(-12) : []).forEach(item => {
+    if (item && ['user', 'assistant'].includes(item.role) && typeof item.content === 'string') {
+      messages.push({role: item.role, content: item.content.slice(0, 6000)});
+    }
+  });
+  messages.push({role: 'user', content: prompt});
+  const trace = [], sources = [];
+  let lastContent = '';
+  for (let step = 1; step <= 4; step += 1) {
+    const result = await directProviderCompletion(provider, messages, runtime.tools || []);
+    const message = result.message;
+    if (!message || typeof message !== 'object') throw new Error('Provider response contained no assistant message.');
+    const content = messageText(message.content).trim();
+    if (content) lastContent = content.slice(0, 50000);
+    let calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    if (!result.nativeTools && promptNeedsTools(prompt)) {
+      return {
+        ...directResult('This provider/model does not support tool calling, so II cannot safely answer this factual or tool-dependent request.', [], [], false, 'hybrid:browser-direct:no-tools'),
+        status: 'INSUFFICIENT_DATA', response_kind: 'provider_without_tools'
+      };
+    }
+    if (!calls.length) {
+      if (!lastContent) throw new Error('Provider returned an empty response.');
+      const final = directResult(lastContent, trace, sources, result.nativeTools);
+      if (!result.nativeTools) {
+        final.pipeline = 'hybrid:browser-direct:no-tools';
+        final.response_kind = 'conversation_without_tools';
+      }
+      return final;
+    }
+    const remaining = 6 - trace.length;
+    if (remaining <= 0) return directResult(lastContent || 'Tool-call safety limit reached.', trace, sources, result.nativeTools, 'hybrid:browser-direct:max-tools');
+    calls = calls.slice(0, Math.min(3, remaining));
+    messages.push({role: 'assistant', content: message.content || '', tool_calls: calls});
+    for (const call of calls) {
+      const fn = call && call.function ? call.function : {};
+      let args = fn.arguments || {};
+      if (typeof args === 'string') {
+        try { args = JSON.parse(args); } catch (_) { args = {}; }
+      }
+      const toolResponse = await fetch('/api/hybrid/tool', {
+        method: 'POST', headers: requestHeaders(),
+        body: JSON.stringify({name: String(fn.name || ''), arguments: args})
+      });
+      const tool = await parseJsonResponse(toolResponse, 'II tool');
+      trace.push({step, tool: tool.tool, arguments: tool.arguments, ok: tool.ok, output_preview: tool.output_preview});
+      (tool.sources || []).forEach(source => sources.push(source));
+      messages.push({
+        role: 'tool', tool_call_id: String(call.id || `call_${step}_${trace.length}`),
+        name: String(tool.tool || fn.name || ''), content: String(tool.output || '').slice(0, 14000)
+      });
+    }
+  }
+  return directResult(lastContent || 'The tool loop reached its safety limit without a final answer.', trace, sources, true, 'hybrid:browser-direct:max-steps');
+}
+
+async function serverChat(requestBody){
+  const response = await fetch('/api/chat', {
+    method: 'POST', headers: requestHeaders(), body: JSON.stringify(requestBody)
+  });
+  return parseJsonResponse(response, 'II chat API');
+}
+
+function updateEngineStatus(){
+  const browserProvider = providerConfig();
+  const serverProvider = serverStatus && serverStatus.hybrid_chat_configured;
+  const credentialError = providerCredentialError(browserProvider);
+  if (browserProvider && credentialError) {
+    const preset = presetForApiUrl(browserProvider.api_url);
+    backendStatus.textContent = `BYOK incomplete — ${preset ? preset.name : 'provider'} API key required`;
+    backendStatus.className = 'error';
+    empty.textContent = credentialError;
+    return;
+  }
+  if (browserProvider || serverProvider) {
+    const model = browserProvider ? browserProvider.model : 'server BYOK';
+    const state = browserProvider && verifiedProviderMatches(browserProvider)
+      ? 'BYOK verified + II tools'
+      : 'BYOK configured (not tested) + II tools';
+    backendStatus.textContent = `${state} \u2014 ${model}`;
+    backendStatus.className = 'ready';
+    empty.textContent = 'General conversation is handled by your BYOK model. For factual and complex work it can call II\u2019s search, research, solver, synthesis, static verification, and repository tools.';
+  } else {
+    const webState = serverStatus && serverStatus.web_tools_enabled ? 'internet tools enabled' : 'local tools only';
+    backendStatus.textContent = `II tools ready \u2014 ${webState}; add BYOK for general chat`;
+    backendStatus.className = 'error';
+    empty.textContent = 'Configure any OpenAI-compatible model in BYOK settings for general chat and dynamic tool use. Without BYOK, II uses its narrower deterministic pipelines.';
+  }
+}
+
+PROVIDER_PRESETS.forEach(preset => {
+  const option = document.createElement('option');
+  option.value = preset.id;
+  option.textContent = preset.name;
+  providerPreset.appendChild(option);
 });
+
+iiApiKey.value = sessionStorage.getItem('ii.api.key') || '';
+providerUrl.value = sessionStorage.getItem('ii.provider.url') || '';
+providerModel.value = sessionStorage.getItem('ii.provider.model') || '';
+providerKey.value = sessionStorage.getItem('ii.provider.key') || '';
+const savedDirect = sessionStorage.getItem('ii.provider.direct');
+providerDirect.checked = savedDirect === null
+  ? location.hostname.endsWith('.e2b.app')
+  : savedDirect === 'true';
+const savedPreset = presetForApiUrl(providerUrl.value);
+providerPreset.value = savedPreset ? savedPreset.id : 'custom';
+updateProviderKeyHelp();
+
+providerPreset.onchange = () => {
+  const preset = PROVIDER_PRESETS.find(item => item.id === providerPreset.value);
+  if (preset) {
+    providerUrl.value = preset.api_url;
+    providerModel.value = '';
+    providerModels.replaceChildren();
+    providerNote.textContent = preset.note || '';
+  } else {
+    providerUrl.value = '';
+    providerModel.value = '';
+    providerModels.replaceChildren();
+    providerNote.textContent = 'Enter an OpenAI-compatible endpoint. Leave the key blank only if that endpoint explicitly allows anonymous requests.';
+  }
+  updateProviderKeyHelp();
+};
+providerUrl.addEventListener('input', () => {
+  const match = presetForApiUrl(providerUrl.value.trim());
+  providerPreset.value = match ? match.id : 'custom';
+  updateProviderKeyHelp();
+});
+providerKey.addEventListener('input', () => {
+  // A changed credential may belong to another account with different access.
+  if (providerKey.value !== (sessionStorage.getItem('ii.provider.key') || '')) {
+    clearBlockedModels(providerUrl.value.trim());
+    clearProviderVerification();
+  }
+});
+
+document.getElementById('settingsOpen').onclick = () => settingsDialog.showModal();
+document.getElementById('settingsClose').onclick = () => settingsDialog.close();
+modelsLoad.onclick = async () => {
+  const apiUrl = providerUrl.value.trim();
+  if (!apiUrl) {
+    providerNote.textContent = 'Choose a provider or enter its API URL first.';
+    return;
+  }
+  const selected = PROVIDER_PRESETS.find(item => item.id === providerPreset.value)
+    || presetForApiUrl(apiUrl);
+  const provider = {api_url: apiUrl, api_key: providerKey.value};
+  const credentialError = providerCredentialError(provider);
+  if (credentialError) {
+    providerNote.textContent = credentialError;
+    providerKey.focus();
+    return;
+  }
+  modelsLoad.disabled = true;
+  modelsLoad.textContent = 'Loading…';
+  providerNote.textContent = 'Requesting this provider\u2019s model catalog…';
+  try {
+    if (selected && selected.models_url) provider.models_url = selected.models_url;
+    if (selected && selected.id === 'openrouter') {
+      // Prefer OpenRouter's authenticated, account-filtered catalog. It applies
+      // the account's provider preferences, privacy settings, and guardrails.
+      provider.models_url = 'https://openrouter.ai/api/v1/models/user?limit=1000';
+    }
+    const loadFromServer = async () => {
+      const response = await fetch('/api/providers/models', {
+        method: 'POST', headers: requestHeaders(),
+        body: JSON.stringify({provider})
+      });
+      return parseJsonResponse(response, 'II model-catalog API');
+    };
+    const loadDirectCatalog = async () => {
+      try {
+        const result = await loadModelsDirect(provider, provider.models_url);
+        if (selected && selected.id === 'openrouter') result.catalog_scope = 'account-filtered';
+        return result;
+      } catch (error) {
+        // Some credentials cannot read the personalized catalog, and its CORS
+        // policy can differ from the public route. A 403 here is about catalog
+        // scope, not necessarily inference access; label public fallback.
+        const canUsePublicFallback = selected && selected.id === 'openrouter'
+          && (error.status === 403 || !error.status);
+        if (!canUsePublicFallback) throw error;
+        const result = await loadModelsDirect(provider, 'https://openrouter.ai/api/v1/models');
+        result.catalog_scope = 'public-fallback';
+        result.catalog_notice = 'OpenRouter’s account-filtered catalog was unavailable to this credential/browser, so the public catalog is shown. Test a model before saving.';
+        return result;
+      }
+    };
+    let data;
+    if (providerDirect.checked) {
+      try {
+        data = await loadDirectCatalog();
+      } catch (directError) {
+        // An HTTP response proves the browser reached the provider. Preserve its
+        // useful auth/model error instead of masking it with a server fallback.
+        if (directError.status) throw directError;
+        try {
+          data = await loadFromServer();
+        } catch (serverError) {
+          throw new Error(`Direct catalog connection failed: ${redactProviderError(directError, provider)}. Server catalog connection also failed: ${redactProviderError(serverError, provider)}`);
+        }
+      }
+    } else {
+      try {
+        data = await loadFromServer();
+      } catch (serverError) {
+        if (![424, 502, 503, 504].includes(serverError.status)) throw serverError;
+        providerNote.textContent = 'The server could not reach the provider; trying this browser directly…';
+        data = await loadDirectCatalog();
+      }
+    }
+    const allModels = Array.isArray(data.models) ? data.models : [];
+    const visibleModels = allModels.filter(model => !modelIsBlocked(provider, model));
+    const blockedCount = allModels.length - visibleModels.length;
+    providerModels.replaceChildren();
+    visibleModels.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      providerModels.appendChild(option);
+    });
+    if (modelIsBlocked(provider, providerModel.value)) providerModel.value = '';
+    if (!providerModel.value && visibleModels.length === 1) providerModel.value = visibleModels[0];
+    const via = data.transport === 'browser-direct' ? ' directly from the browser' : '';
+    const scope = data.catalog_scope === 'account-filtered' ? ' from the account-filtered catalog' : '';
+    const hidden = blockedCount ? ` ${blockedCount} model rejected earlier in this tab ${blockedCount === 1 ? 'was' : 'were'} hidden.` : '';
+    providerNote.textContent = data.catalog_notice
+      || `${visibleModels.length} models loaded${via}${scope}.${hidden} Type to filter; try “free” where labelled, then use Test model.`;
+  } catch (error) {
+    const failedProvider = {api_url: apiUrl, api_key: providerKey.value};
+    providerNote.textContent = `Could not load models: ${providerFailureMessage(error, failedProvider)}. You can enter a valid model ID manually if this provider does not expose a catalog.`;
+  } finally {
+    modelsLoad.disabled = false;
+    modelsLoad.textContent = 'Load models';
+  }
+};
+providerTest.onclick = async () => {
+  const provider = {
+    api_url: providerUrl.value.trim(),
+    model: providerModel.value.trim(),
+    api_key: providerKey.value
+  };
+  if (!provider.api_url || !provider.model) {
+    providerNote.textContent = 'Choose a provider and model before testing.';
+    (provider.api_url ? providerModel : providerUrl).focus();
+    return;
+  }
+  const credentialError = providerCredentialError(provider);
+  if (credentialError) {
+    providerNote.textContent = credentialError;
+    providerKey.focus();
+    return;
+  }
+  if (modelIsBlocked(provider, provider.model)) {
+    providerNote.textContent = `The provider already rejected “${provider.model}” for this client in this tab. Choose another model, or change the provider credential to test a different account.`;
+    providerModel.focus();
+    providerModel.select();
+    return;
+  }
+  if (!window.confirm('Testing sends one small real inference request and may consume provider quota or credits. A provider that rejects tool fields may receive one text-only retry. Continue?')) return;
+  providerTest.disabled = true;
+  providerTest.textContent = 'Testing…';
+  providerNote.textContent = 'Testing this exact provider, credential, model, and chat-completions route…';
+  try {
+    let nativeTools = null;
+    if (providerDirect.checked) {
+      try {
+        const runtime = await directRuntime();
+        const result = await directProviderCompletion(provider, [
+          {role: 'system', content: 'This is a connection test. Follow the user instruction exactly.'},
+          {role: 'user', content: 'Reply with exactly OK. Do not call a tool.'}
+        ], runtime.tools || [], {max_tokens: 16});
+        const message = result.message;
+        const hasOutput = message && (messageText(message.content).trim()
+          || (Array.isArray(message.tool_calls) && message.tool_calls.length));
+        if (!hasOutput) throw new Error('Provider returned no assistant output during the connection test.');
+        nativeTools = result.nativeTools;
+      } catch (directError) {
+        if (directError.status) throw directError;
+        const data = await serverChat({
+          message: 'Reply with exactly OK. Do not call a tool.',
+          history: [], pipeline: 'hybrid', provider
+        });
+        nativeTools = data.provider_tool_support !== false;
+      }
+    } else {
+      const data = await serverChat({
+        message: 'Reply with exactly OK. Do not call a tool.',
+        history: [], pipeline: 'hybrid', provider
+      });
+      nativeTools = data.provider_tool_support !== false;
+    }
+    markProviderVerified(provider);
+    const saved = providerConfig();
+    if (saved && providerEndpointKey(saved.api_url) === providerEndpointKey(provider.api_url)
+        && saved.model === provider.model) updateEngineStatus();
+    providerNote.textContent = nativeTools
+      ? 'Connection test passed and the provider accepted II’s tool schemas. Click Save settings.'
+      : 'Connection test passed for ordinary chat, but this model rejected native tool calling. It cannot safely handle factual/tool-dependent II requests. Click Save only if text-only chat is acceptable.';
+  } catch (error) {
+    const kind = providerFailureKind(error, provider);
+    const detail = providerFailureMessage(error, provider);
+    clearProviderVerification();
+    if (kind === 'model_access' || kind === 'model_not_found') {
+      const rejectedModel = provider.model;
+      blockModelForTab(provider);
+      Array.from(providerModels.options).forEach(option => {
+        if (option.value === rejectedModel) option.remove();
+      });
+      providerModel.value = '';
+      const saved = providerConfig();
+      if (saved && providerEndpointKey(saved.api_url) === providerEndpointKey(provider.api_url)
+          && saved.model === rejectedModel) {
+        sessionStorage.removeItem('ii.provider.model');
+        updateEngineStatus();
+      }
+      providerNote.textContent = `${detail} “${rejectedModel}” was removed from this tab’s choices for one hour.`;
+      providerModel.focus();
+    } else {
+      providerNote.textContent = `Connection test failed: ${detail}`;
+      if (kind === 'authentication') providerKey.focus();
+    }
+  } finally {
+    providerTest.disabled = false;
+    providerTest.textContent = 'Test model';
+  }
+};
+document.getElementById('providerSave').onclick = () => {
+  const apiUrl = providerUrl.value.trim();
+  const model = providerModel.value.trim();
+  if ((apiUrl && !model) || (!apiUrl && model)) {
+    providerNote.textContent = 'Provider API URL and model must be entered together.';
+    return;
+  }
+  const credentialError = apiUrl
+    ? providerCredentialError({api_url: apiUrl, api_key: providerKey.value})
+    : '';
+  if (credentialError) {
+    providerNote.textContent = credentialError;
+    providerKey.focus();
+    return;
+  }
+  if (apiUrl && modelIsBlocked({api_url: apiUrl}, model)) {
+    providerNote.textContent = `The provider rejected “${model}” for this client earlier in this tab. Choose another model and use Test model before saving.`;
+    providerModel.focus();
+    providerModel.select();
+    return;
+  }
+  if (apiUrl) {
+    try {
+      const parsed = new URL(apiUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+        throw new Error('unsafe URL');
+      }
+    } catch (_) {
+      providerNote.textContent = 'Enter a valid absolute HTTP(S) provider URL.';
+      return;
+    }
+  }
+  sessionStorage.setItem('ii.api.key', iiApiKey.value);
+  sessionStorage.setItem('ii.provider.direct', String(providerDirect.checked));
+  if (apiUrl) {
+    sessionStorage.setItem('ii.provider.url', apiUrl);
+    sessionStorage.setItem('ii.provider.model', model);
+    sessionStorage.setItem('ii.provider.key', providerKey.value);
+  } else {
+    ['ii.provider.url', 'ii.provider.model', 'ii.provider.key'].forEach(k => sessionStorage.removeItem(k));
+  }
+  providerNote.textContent = '';
+  conversationHistory.length = 0;
+  settingsDialog.close();
+  refreshStatus();
+};
+document.getElementById('providerClear').onclick = () => {
+  clearBlockedModels(providerUrl.value.trim());
+  clearProviderVerification();
+  ['ii.provider.url', 'ii.provider.model', 'ii.provider.key'].forEach(k => sessionStorage.removeItem(k));
+  providerPreset.value = 'custom';
+  providerUrl.value = ''; providerModel.value = ''; providerKey.value = '';
+  providerModels.replaceChildren();
+  updateProviderKeyHelp();
+  providerNote.textContent = 'BYOK configuration cleared.';
+  conversationHistory.length = 0;
+  updateEngineStatus();
+};
+
+function refreshStatus(){
+  fetch('/api/status', {headers: requestHeaders()}).then(r => {
+    if (!r.ok) throw new Error(`status ${r.status}`);
+    return r.json();
+  }).then(status => {
+    if (!status.engine_ready) throw new Error('engine unavailable');
+    serverStatus = status;
+    updateEngineStatus();
+    const stages = status.pipeline_stages || {};
+    const active = Object.entries(stages).filter(([, s]) => s.active).map(([name]) => name);
+    if (active.length) backendStatus.title = 'Active pipeline stages: ' + active.join(', ');
+  }).catch(() => {
+    serverStatus = null;
+    backendStatus.textContent = 'II engine status unavailable — check server API key';
+    backendStatus.className = 'error';
+    empty.textContent = 'The II server could not report its status. If II_API_KEY is enabled, add it in BYOK settings.';
+  });
+}
+refreshStatus();
 
 function scrollBottom(){ chat.scrollTop = chat.scrollHeight; }
 
@@ -195,6 +1012,54 @@ function addMessage(role, text, meta){
   div.appendChild(bubble);
   if(meta){ const m=document.createElement('div'); m.className='meta'; m.textContent=meta; div.appendChild(m); }
   chat.appendChild(div);
+  scrollBottom();
+}
+
+function safeHttpUrl(value){
+  try {
+    const parsed = new URL(value);
+    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : null;
+  } catch (_) { return null; }
+}
+
+function addResultDetails(sources, trace){
+  const safeSources = (Array.isArray(sources) ? sources : []).map(source => ({
+    title: String((source && source.title) || ''),
+    url: safeHttpUrl(source && source.url)
+  })).filter(source => source.url);
+  const tools = Array.isArray(trace) ? trace : [];
+  if (!safeSources.length && !tools.length) return;
+  const details = document.createElement('details');
+  details.className = 'result-details';
+  const summary = document.createElement('summary');
+  const labels = [];
+  if (tools.length) labels.push(`${tools.length} tool call${tools.length === 1 ? '' : 's'}`);
+  if (safeSources.length) labels.push(`${safeSources.length} source${safeSources.length === 1 ? '' : 's'}`);
+  summary.textContent = labels.join(' · ');
+  details.appendChild(summary);
+  const list = document.createElement('ul');
+  tools.forEach(item => {
+    const li = document.createElement('li');
+    const state = item && item.ok ? 'ok' : 'failed';
+    let label = `${String((item && item.tool) || 'unknown tool')} — ${state}`;
+    if (state === 'failed' && item && item.output_preview) {
+      label += `: ${String(item.output_preview).slice(0, 240)}`;
+    }
+    li.textContent = label;
+    list.appendChild(li);
+  });
+  safeSources.forEach(source => {
+    const li = document.createElement('li');
+    const link = document.createElement('a');
+    link.href = source.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = source.title || source.url;
+    li.appendChild(link);
+    list.appendChild(li);
+  });
+  details.appendChild(list);
+  chat.appendChild(details);
   scrollBottom();
 }
 
@@ -218,7 +1083,7 @@ function addCodeBlock(code){
 function setTyping(on){
   let t = document.getElementById('typing');
   if(on && !t){
-    t = document.createElement('div'); t.id='typing'; t.className='msg ii'; t.innerHTML='<div class="bubble typing">II is thinking…</div>';
+    t = document.createElement('div'); t.id='typing'; t.className='msg ii'; t.innerHTML='<div class="bubble typing">II is routing tools and sources…</div>';
     chat.appendChild(t);
   } else if(!on && t){ t.remove(); }
   scrollBottom();
@@ -226,25 +1091,95 @@ function setTyping(on){
 
 async function sendMessage(){
   const text = input.value.trim();
-  if(!text) return;
+  if(!text || send.disabled) return;
+  const started = performance.now();
   input.value='';
+  send.disabled = true;
   addMessage('user', text);
   setTyping(true);
+  const requestBody = {
+    message: text,
+    history: conversationHistory.slice(-12)
+  };
+  const provider = providerConfig();
+  const useLocalFastPath = localConversationFastPath(text);
+  if (useLocalFastPath) {
+    // Greetings, thanks, identity/help, wellbeing, and farewells already have
+    // deterministic local answers. Do not spend hosted quota or fail merely
+    // because a provider is rate-limited.
+    requestBody.pipeline = 'pure_ii';
+  } else if (provider) {
+    requestBody.pipeline = 'hybrid';
+    requestBody.provider = provider;
+  }
   try{
-    const res = await fetch('/api/chat', {
-      method:'POST', headers: apiHeaders,
-      body: JSON.stringify({message: text})
-    });
-    const data = await res.json();
-    setTyping(false);
-    if(data.error){ addMessage('ii','Error: '+data.error); return; }
-    const response = data.response || '';
-    addMessage('ii', response);
-    if (data.status) {
-      addMessage('ii', `\n[status: ${data.status} | intent: ${data.intent || 'n/a'}]`);
+    const credentialError = useLocalFastPath ? '' : providerCredentialError(provider);
+    if (credentialError) {
+      settingsDialog.showModal();
+      providerNote.textContent = credentialError;
+      providerKey.focus();
+      const missingKeyError = new Error(credentialError);
+      missingKeyError.providerKind = 'authentication';
+      throw missingKeyError;
     }
+    let data;
+    if (useLocalFastPath) {
+      data = await serverChat(requestBody);
+    } else if (provider && providerDirect.checked) {
+      try {
+        data = await directHybridChat(text, provider, requestBody.history);
+      } catch (directError) {
+        // Do not hide an authoritative provider HTTP error (especially 401/403)
+        // behind an unrelated hosted-server network failure.
+        if (directError.status) {
+          const providerError = new Error(providerFailureMessage(directError, provider));
+          providerError.status = directError.status;
+          providerError.providerKind = providerFailureKind(directError, provider);
+          throw providerError;
+        }
+        try { data = await serverChat(requestBody); }
+        catch (serverError) {
+          throw new Error(`Direct provider connection failed: ${providerFailureMessage(directError, provider)}. Server connection also failed: ${redactProviderError(serverError, provider)}`);
+        }
+      }
+    } else {
+      try {
+        data = await serverChat(requestBody);
+      } catch (serverError) {
+        const canTryDirect = provider && [424, 502, 503, 504].includes(serverError.status);
+        if (!canTryDirect) throw serverError;
+        data = await directHybridChat(text, provider, requestBody.history);
+      }
+    }
+    if (provider && !useLocalFastPath) {
+      markProviderVerified(provider);
+      updateEngineStatus();
+    }
+    setTyping(false);
+    const response = data.response || '';
+    const elapsed = ((performance.now() - started) / 1000).toFixed(1);
+    const metaParts = [];
+    if (data.provider_transport === 'browser-direct') metaParts.push('direct browser connection');
+    if (data.provider_tool_support === false) {
+      metaParts.push('BYOK text-only · provider tools unsupported');
+    } else if (data.pipeline && data.pipeline.startsWith('hybrid:')) {
+      metaParts.push('BYOK + II tools');
+    } else if (data.intent === 'chat' && data.response_kind) {
+      metaParts.push('deterministic fallback');
+    } else if (data.status) {
+      metaParts.push(data.status);
+    }
+    if (data.intent) metaParts.push(data.intent.replaceAll('_', ' '));
+    const toolCount = (data.tool_trace || []).length;
+    if (toolCount) metaParts.push(`${toolCount} tool call${toolCount === 1 ? '' : 's'}`);
+    metaParts.push(`${elapsed}s`);
+    addMessage('ii', response, metaParts.join(' · '));
+    addResultDetails(data.sources, data.tool_trace);
+    conversationHistory.push({role: 'user', content: text});
+    conversationHistory.push({role: 'assistant', content: response});
+    if (conversationHistory.length > 24) conversationHistory.splice(0, conversationHistory.length - 24);
     (data.questions || []).forEach(q => {
-      addMessage('ii', `\n[question - ${q.slot}] ${q.question}\n(default: ${q.default})`);
+      addMessage('ii', `[question — ${q.slot}] ${q.question}\nDefault: ${q.default}`);
     });
     // render code blocks
     const fenceRe = /```python\s*\n([\s\S]*?)\n```/g;
@@ -254,7 +1189,34 @@ async function sendMessage(){
     }
   }catch(e){
     setTyping(false);
-    addMessage('ii','Could not reach the II server. Is it running?');
+    let detail = redactProviderError(e, provider);
+    const kind = e && e.providerKind ? e.providerKind : providerFailureKind(e, provider);
+    const modelRejected = provider && (kind === 'model_access' || kind === 'model_not_found');
+    if (modelRejected) {
+      const rejectedModel = provider.model;
+      blockModelForTab(provider);
+      clearProviderVerification();
+      Array.from(providerModels.options).forEach(option => {
+        if (option.value === rejectedModel) option.remove();
+      });
+      providerModel.value = '';
+      sessionStorage.removeItem('ii.provider.model');
+      updateEngineStatus();
+      detail += ` “${rejectedModel}” was removed from this tab’s choices for one hour.`;
+    }
+    const nextStep = modelRejected
+      ? 'The rejected model was removed; choose and test another model in BYOK settings'
+      : providerNextStep(kind);
+    addMessage('ii', `Request failed: ${detail}`, nextStep);
+    if (provider && ['model_access', 'model_not_found', 'authentication'].includes(kind)) {
+      if (!settingsDialog.open) settingsDialog.showModal();
+      providerNote.textContent = detail;
+      if (kind === 'authentication') providerKey.focus();
+      else providerModel.focus();
+    }
+  } finally {
+    send.disabled = false;
+    input.focus();
   }
 }
 

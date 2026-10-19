@@ -27,9 +27,48 @@ acceptable on a machine where the server is bound to localhost. `GET
 /api/status` always reports which mode is active (`api_auth`), and starting
 the server with a non-localhost `--host` prints a loud warning.
 
-The local chat page injects the configured key into the page it serves so the
-browser UI keeps working on the same machine; the key protects the API from
-*other* hosts, not from the person sitting at the keyboard.
+The chat page never embeds `II_API_KEY` in HTML. When authentication is
+enabled, enter the II server key in the page's settings; it is retained only in
+tab-scoped `sessionStorage` and sent as `X-II-API-Key`. This keeps merely
+loading the page from disclosing the server credential.
+
+## OpenAI-compatible BYOK
+
+* UI-supplied provider URL, model, and key are kept in browser `sessionStorage`
+  (the current tab only) and sent with chat requests. II does not write them to
+  disk, logs, response bodies, memory, or tool traces.
+* Server-side deployments may use `II_CHAT_API_URL`, `II_CHAT_MODEL`, and
+  `II_CHAT_API_KEY`; `/api/status` reveals only whether configuration exists.
+* User-supplied endpoints must resolve to a public HTTP(S) address. Redirects
+  are rejected. Private/loopback endpoints require the operator-only
+  `II_CHAT_ALLOW_PRIVATE_ENDPOINT=1` override.
+* **Load models** sends the same ephemeral key to the selected provider's
+  catalog endpoint. OpenRouter first uses its authenticated `/models/user`
+  route and labels any explicit fallback to the public `/models` route. Every
+  built-in preset requires its provider API key; a `free` model label describes
+  pricing, not anonymous access. In particular, an OpenCode website login
+  cookie is not an OpenCode Zen API key. Presets only supply base URLs; they do
+  not grant access or bypass provider accounts, quotas, terms, or billing.
+* **Test model** requires confirmation and sends a small real inference request
+  that may consume quota or credits (plus one text-only retry only when tool
+  fields are rejected). A model-specific access rejection stores only endpoint,
+  model ID, and one-hour expiry in tab-local `sessionStorage`; no credential or
+  provider response is cached.
+* Optional browser-direct transport sends the key, conversation, and returned
+  tool outputs from the current tab directly to the selected HTTPS provider.
+  It is intended for CORS-enabled providers when a hosted II server has blocked
+  egress. Safe tool execution still goes through authenticated II endpoints;
+  arbitrary execution is never exposed. Disable the checkbox to require the
+  normal server-side transport.
+* The provider receives conversation text and tool outputs. Choose a provider
+  whose privacy and retention policy you accept. OpenRouter requests include
+  truthful `HTTP-Referer` and `X-Title` attribution for this project; II does
+  not spoof the identity of a separately approved agentic app to bypass model
+  access policies.
+* Hybrid chat exposes only a safe tool allowlist. It never offers arbitrary
+  code execution to the hosted model.
+* Protect an exposed II server with `II_API_KEY`; otherwise another user could
+  submit requests using server-side BYOK credentials.
 
 ## Binding and exposure
 
@@ -48,22 +87,20 @@ II_PRIVATE=1 python app.py        # PowerShell: $env:II_PRIVATE="1"
 
 When enabled (values `1/true/yes/on`):
 
-- Model tools `search_web`, `read_url`, and `research` are refused, and web
-  tools are no longer offered to the model.
+- Internet tools `search_web`, `read_url`, and `research` are refused, hosted
+  BYOK calls are blocked, and web stages are no longer offered to the router.
 - HTTP routes `/api/search`, `/api/fetch`, `/api/research`, and
   `/api/repos/ingest` return **403**.
 - The agent's forced-search and search-synthesis fallbacks are skipped.
 - Repo ingestion also refuses when called from the CLI/library.
-- Local-only features keep working: GGUF/LM Studio chat, repository graph and
-  topology, blackboard, static verification, Z3 explicit formulas, bounded
+- Local-only features keep working: conversational replies, repository graph
+  and topology, blackboard, static verification, Z3 explicit formulas, bounded
   synthesis, and code execution (subject to the sandbox settings below).
 
-Consequences: agentic mode (which answers purely from web search) cannot
-answer under private mode without a local model backend, and current-events
-answers will be stale. `GET /api/status` reports `private_mode` and
-`web_tools_enabled` so the UI/operators can verify the state. LM Studio, if
-used, must itself be local for the setup to be network-free; a GGUF backend
-makes no network calls in II's code.
+Consequences: factual questions that require external evidence fail closed
+under private mode, and current-events questions cannot be answered.
+`GET /api/status` reports `private_mode` and `web_tools_enabled` so the
+UI/operators can verify the state.
 
 ## SSRF guard on URL fetching
 

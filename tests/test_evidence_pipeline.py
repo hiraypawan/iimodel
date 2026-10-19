@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from ingestion.ii_web import (
+    SearchResponse,
+    SearchResult,
     build_evidence_report,
     candidate_contradictions,
     extract_evidence_passages,
 )
+from reasoning.logic_tree_solver import _default_fetcher
 
 
 class EvidencePipelineTests(unittest.TestCase):
@@ -33,6 +37,32 @@ class EvidencePipelineTests(unittest.TestCase):
         signals = candidate_contradictions(passages)
         self.assertEqual(len(signals), 1)
         self.assertIn("human review", signals[0]["note"].lower())
+
+    def test_logic_tree_uses_search_snippet_without_refetching_page(self):
+        result = SearchResult(
+            citation_id="[1]",
+            title="France",
+            link="https://example.org/france",
+            snippet="The capital of France is Paris, its largest metropolitan city.",
+            source="test",
+            fetched_at="2026-10-19T00:00:00+00:00",
+            authority_score=70,
+        )
+        response = SearchResponse(
+            query="France capital",
+            results=[result],
+            total_found=1,
+            backends_used=["test"],
+            citation_map={},
+        )
+        with patch("ingestion.ii_web.search_results", return_value=response), patch(
+            "ingestion.ii_web.fetch_page_text"
+        ) as fetch_page:
+            pages = _default_fetcher("France capital", 5)
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(pages[0]["retrieval"], "search_snippet")
+        self.assertIn("Paris", pages[0]["text"])
+        fetch_page.assert_not_called()
 
 
 if __name__ == "__main__":

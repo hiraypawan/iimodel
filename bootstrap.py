@@ -1,8 +1,8 @@
-"""Cross-platform bootstrapper for the II prototype.
+"""Cross-platform bootstrapper for Pure Internet Intelligence.
 
 Creates a local virtual environment, installs the declared dependencies, and
-starts the Flask app. Model weights and llama-cpp-python are not downloaded or
-installed automatically; LM Studio is the recommended model backend.
+starts II's tool engine. General chat can use an optional OpenAI-compatible
+BYOK provider; no bundled model weights or dedicated local server are needed.
 """
 
 from __future__ import annotations
@@ -43,9 +43,7 @@ def main() -> None:
     run([str(python_exe), "-m", "pip", "install", "--upgrade", "pip"])
     run([str(python_exe), "-m", "pip", "install", "-r", str(REQUIREMENTS)])
 
-    print("[INFO] Model weights are not bundled.")
-    print("[INFO] For model chat, start LM Studio with a model loaded at http://127.0.0.1:1234.")
-    print("[INFO] Otherwise the app will start in demo mode and show setup instructions.")
+    print("[INFO] II tools need no GGUF model; general chat supports OpenAI-compatible BYOK.")
     print("[LAUNCH] Starting II at http://127.0.0.1:5000/")
     os.chdir(HERE)
     run([str(python_exe), "app.py"])

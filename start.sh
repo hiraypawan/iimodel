@@ -27,13 +27,8 @@ if [ ! -x "${VENV_DIR}/bin/python" ]; then
     exit 1
 fi
 
-if [ ! -f "models/qwen2.5-1.5b-instruct-q4_0.gguf" ]; then
-    echo "[INFO] No GGUF model in models/ - the app will use LM Studio if"
-    echo "       running, otherwise it renders structured results without a"
-    echo "       model backend. See README.md."
-    echo
-fi
-
+echo "Engine: II internet/tools + optional OpenAI-compatible BYOK chat"
+echo
 echo "Starting II v3.0 server..."
 echo
 # Record the PID so that ./stop.sh can stop this instance.

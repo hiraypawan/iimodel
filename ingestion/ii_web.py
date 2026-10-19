@@ -15,15 +15,17 @@ later claim verification.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from html import escape
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 import trafilatura
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 from core.ii_security import is_private_mode, validate_public_url, web_blocked_message
 
@@ -37,6 +39,24 @@ except ImportError:
 # Search result cache (300-second TTL for speed)
 # --------------------------------------------------------------------------- #
 _search_cache: dict[str, tuple[str, float]] = {}
+
+
+def _bounded_timeout(name: str, default: float, minimum: float = 1.0,
+                     maximum: float = 15.0) -> float:
+    """Read a network timeout without allowing accidental minute-long waits."""
+    try:
+        value = float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+# A search request used to wait 15 seconds for each of eight SearXNG hosts,
+# then repeat through several fallbacks.  One unavailable internet path could
+# therefore make a simple question take well over a minute.  Backends now run
+# concurrently and every outbound call has this short, configurable deadline.
+WEB_TIMEOUT = _bounded_timeout("II_WEB_TIMEOUT", 4.0)
+SEARXNG_FANOUT = 3
 
 
 # --------------------------------------------------------------------------- #
@@ -217,7 +237,7 @@ def fetch_evidence(url: str, max_chars: int = 4000) -> FetchResult:
 def _search_duckduckgo(query: str, max_results: int) -> list[SearchResult]:
     results: list[SearchResult] = []
     try:
-        with DDGS() as ddgs:
+        with DDGS(timeout=max(1, int(WEB_TIMEOUT))) as ddgs:
             for i, r in enumerate(ddgs.text(query, region="wt-wt",
                                            max_results=max_results), 1):
                 results.append(SearchResult(
@@ -239,35 +259,50 @@ def _search_duckduckgo(query: str, max_results: int) -> list[SearchResult]:
 # --------------------------------------------------------------------------- #
 # Backend 2: Public SearXNG instances (free, no key)
 # --------------------------------------------------------------------------- #
+def _search_one_searxng(base: str, query: str,
+                         max_results: int) -> list[SearchResult]:
+    if requests is None or max_results <= 0:
+        return []
+    try:
+        resp = requests.get(
+            base.rstrip("/") + "/search",
+            params={"q": query, "format": "json", "language": "en"},
+            timeout=WEB_TIMEOUT,
+            headers={"User-Agent": "II-Pure-Internet-Intelligence/3.0"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        results: list[SearchResult] = []
+        for i, item in enumerate(data.get("results", [])[:max_results], 1):
+            results.append(SearchResult(
+                citation_id=_make_citation_id(i),
+                title=item.get("title", ""),
+                link=item.get("url", ""),
+                snippet=item.get("content", ""),
+                source="searxng",
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                authority_score=_heuristic_domain_score(
+                    item.get("url", "").split("//")[-1].split("/")[0]
+                ),
+            ))
+        return results
+    except Exception:
+        return []
+
+
 def _search_searxng(query: str, max_results: int) -> list[SearchResult] | None:
-    if requests is None:
+    """Query a small SearXNG fan-out concurrently, not eight hosts in series."""
+    if requests is None or max_results <= 0:
         return None
-    for base in SEARXNG_INSTANCES:
-        try:
-            resp = requests.get(
-                base.rstrip("/") + "/search",
-                params={"q": query, "format": "json", "language": "en"},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            results: list[SearchResult] = []
-            for i, item in enumerate(data.get("results", [])[:max_results], 1):
-                results.append(SearchResult(
-                    citation_id=_make_citation_id(i),
-                    title=item.get("title", ""),
-                    link=item.get("url", ""),
-                    snippet=item.get("content", ""),
-                    source="searxng",
-                    fetched_at=datetime.now(timezone.utc).isoformat(),
-                    authority_score=_heuristic_domain_score(
-                        item.get("url", "").split("//")[-1].split("/")[0]
-                    ),
-                ))
-            if results:
-                return results
-        except Exception:
-            continue
+    instances = SEARXNG_INSTANCES[:SEARXNG_FANOUT]
+    with ThreadPoolExecutor(max_workers=len(instances)) as executor:
+        batches = list(executor.map(
+            lambda base: _search_one_searxng(base, query, max_results),
+            instances,
+        ))
+    for batch in batches:  # deterministic instance priority
+        if batch:
+            return batch
     return None
 
 
@@ -289,7 +324,7 @@ def _search_wikipedia(query: str, max_results: int) -> list[SearchResult]:
                 "srlimit": max_results,
                 "format": "json",
             },
-            timeout=15,
+            timeout=WEB_TIMEOUT,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -316,6 +351,11 @@ def _search_wikipedia(query: str, max_results: int) -> list[SearchResult]:
 # --------------------------------------------------------------------------- #
 def _search_brave(query: str, max_results: int) -> list[SearchResult]:
     results: list[SearchResult] = []
+    api_key = (os.environ.get("BRAVE_SEARCH_API_KEY") or "").strip()
+    # Brave's API does require a subscription token.  An empty-token request
+    # can only fail, so do not spend network latency on it.
+    if not api_key:
+        return results
     try:
         if requests is not None:
             resp = requests.get(
@@ -323,10 +363,10 @@ def _search_brave(query: str, max_results: int) -> list[SearchResult]:
                 params={"q": query, "count": max_results},
                 headers={
                     "Accept": "application/json",
-                    "X-Subscription-Token": "",  # Free tier: empty or basic
+                    "X-Subscription-Token": api_key,
                     "User-Agent": "II-Agent/1.0",
                 },
-                timeout=15,
+                timeout=WEB_TIMEOUT,
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -392,7 +432,7 @@ def _search_github(query: str, max_results: int) -> list[SearchResult]:
         resp = requests.get(
             "https://api.github.com/search/repositories",
             params={"q": query, "sort": "stars", "order": "desc", "per_page": max_results},
-            timeout=15,
+            timeout=WEB_TIMEOUT,
             headers={"Accept": "application/vnd.github+json", "User-Agent": "II-Agent/1.0"},
         )
         if resp.status_code == 200:
@@ -427,7 +467,7 @@ def _search_crossref(query: str, max_results: int) -> list[SearchResult]:
                 "rows": max_results,
                 "select": "DOI,title,author,published,URL,abstract",
             },
-            timeout=15,
+            timeout=WEB_TIMEOUT,
             headers={"User-Agent": "II-Agent/1.0 (mailto:research@iimodel.local)"},
         )
         resp.raise_for_status()
@@ -457,11 +497,12 @@ def search_web(query: str, max_results: int = 5,
                region: str = "wt-wt",
                require_citations: bool = True) -> str:
     """
-    Search the web using free backends (no API keys required).
+    Search the web with concurrent, bounded-latency backends.
 
-    Priority (as implemented): Brave -> SearXNG -> DuckDuckGo ->
-    GitHub API -> Headless -> Wikipedia -> Crossref (academic only).
-    Results are merged and de-duplicated by URL.
+    DuckDuckGo and Wikipedia are enabled by default. GitHub and Crossref are
+    selected by query type; Brave is used when ``BRAVE_SEARCH_API_KEY`` is set.
+    SearXNG/headless search are explicit opt-ins because public instances can
+    be slow or unavailable. Results are merged and de-duplicated by URL.
     Returns text with citation-tagged results plus a RAW_JSON block.
     Blocked entirely when II_PRIVATE is enabled.
     """
@@ -477,113 +518,64 @@ def search_web(query: str, max_results: int = 5,
         result_text, cached_time = cached
         if time.time() - cached_time < 300:
             return result_text
-    is_repo_query = any(k in query.lower() for k in ["github", "repo", "reverse engineering", "trending"])
+    lowered_query = query.lower()
+    is_repo_query = any(
+        key in lowered_query
+        for key in ("github", "repo", "repository", "reverse engineering", "trending")
+    )
+    is_academic = any(
+        key in lowered_query
+        for key in ("study", "paper", "research", "doi", "academic", "journal", "publication")
+    )
 
-    # Priority order: Brave (fast, rich) -> SearXNG (meta) -> DuckDuckGo (site:github.com for repos) -> GitHub API -> Headless (live) -> Wikipedia -> Crossref (academic only)
-    # Brave first (fast free tier, best snippets)
-    brave_results = _search_brave(query, max_results)
-    if brave_results:
-        for r in brave_results:
-            if r.link not in seen_links:
-                all_results.append(r)
-                seen_links.add(r.link)
-        backends_used.append("brave")
+    # Search independent providers concurrently.  Results are merged below in
+    # a fixed priority order, so concurrency improves latency without making
+    # output ordering nondeterministic.
+    providers: list[tuple[str, Callable[[], list[SearchResult]]]] = [
+        ("duckduckgo", lambda: _search_duckduckgo(
+            f"{query} site:github.com" if is_repo_query else query,
+            max_results,
+        )),
+        ("wikipedia", lambda: _search_wikipedia(query, max_results)),
+    ]
+    # Public SearXNG instances are community services and can hang in DNS or
+    # proxy setup even after an HTTP timeout.  Keep them as an explicit extra,
+    # not on the latency-critical default path.
+    if os.environ.get("II_ENABLE_SEARXNG", "").strip() == "1":
+        providers.append(("searxng", lambda: _search_searxng(query, max_results) or []))
+    if (os.environ.get("BRAVE_SEARCH_API_KEY") or "").strip():
+        providers.insert(0, ("brave", lambda: _search_brave(query, max_results)))
+    if is_repo_query:
+        providers.append(("github", lambda: _search_github(query, max_results)))
+    if is_academic:
+        providers.append(("crossref", lambda: _search_crossref(query, max_results)))
+    if os.environ.get("II_ENABLE_HEADLESS_SEARCH", "").strip() == "1":
+        providers.append(("headless", lambda: _search_headless(query, max_results)))
 
-    # SearXNG (meta-aggregator)
-    remaining = max_results - len(all_results)
-    sx_results = _search_searxng(query, remaining) if remaining > 0 else None
-    if sx_results:
-        for r in sx_results:
-            if r.link not in seen_links:
-                all_results.append(r)
-                seen_links.add(r.link)
-        backends_used.append("searxng")
+    batches: dict[str, list[SearchResult]] = {}
+    with ThreadPoolExecutor(max_workers=min(6, len(providers))) as executor:
+        futures = [(name, executor.submit(call)) for name, call in providers]
+        for name, future in futures:
+            try:
+                batch = future.result()
+            except Exception:
+                batch = []
+            batches[name] = list(batch or [])
 
-    # DuckDuckGo (fill remaining, with site:github.com for repo queries)
-    remaining = max_results - len(all_results)
-    if remaining > 0:
-        ddg_query = query
-        if is_repo_query:
-            ddg_query = f"{query} site:github.com"
-        ddg_results = _search_duckduckgo(ddg_query, remaining)
-        if ddg_results:
-            for r in ddg_results:
-                if r.link not in seen_links:
-                    all_results.append(r)
-                    seen_links.add(r.link)
-            backends_used.append("duckduckgo")
-
-    # GitHub API (repo/code queries — direct results)
-    remaining = max_results - len(all_results)
-    if is_repo_query and remaining > 0:
-        gh_results = _search_github(query, remaining)
-        if gh_results:
-            for r in gh_results:
-                if r.link not in seen_links:
-                    all_results.append(r)
-                    seen_links.add(r.link)
-            backends_used.append("github")
-
-    # Wikipedia (known facts)
-    remaining = max_results - len(all_results)
-    if remaining > 0:
-        wiki_results = _search_wikipedia(query, remaining)
-        if wiki_results:
-            for r in wiki_results:
-                if r.link not in seen_links:
-                    all_results.append(r)
-                    seen_links.add(r.link)
-            backends_used.append("wikipedia")
-
-    # Headless browser (live page extraction — best for current/live info)
-    remaining = max_results - len(all_results)
-    if remaining > 0:
-        headless_results = _search_headless(query, remaining)
-        if headless_results:
-            for r in headless_results:
-                if r.link not in seen_links:
-                    all_results.append(r)
-                    seen_links.add(r.link)
-            backends_used.append("headless")
-
-    # Crossref (academic papers only — skip for repo/viral/search queries to avoid noise)
-    remaining = max_results - len(all_results)
-    if remaining > 0 and not is_repo_query:
-        # Only use Crossref for clearly academic queries
-        is_academic = any(k in query.lower() for k in ["study", "paper", "research", "doi", "academic", "journal", "publication"])
-        if is_academic:
-            cr_results = _search_crossref(query, remaining)
-            if cr_results:
-                for r in cr_results:
-                    if r.link not in seen_links:
-                        all_results.append(r)
-                        seen_links.add(r.link)
-                backends_used.append("crossref")
-
-    # Fallback: try original query with site:github.com for repo queries, then shorter keywords
-    if not all_results:
-        # Try direct github-targeted DDG search first
-        ddg_retry = _search_duckduckgo(f"{query} site:github.com", max_results)
-        if ddg_retry:
-            for r in ddg_retry:
-                if r.link not in seen_links:
-                    all_results.append(r)
-                    seen_links.add(r.link)
-            backends_used.append("duckduckgo")
-        else:
-            # Last resort: single keywords
-            keywords = [w for w in query.split() if len(w) > 2 and w.lower() not in ["the", "and", "for", "now", "what", "is", "that"]]
-            for kw in keywords[:2]:
-                for backend_fn in [_search_duckduckgo, _search_github, _search_searxng, _search_wikipedia]:
-                    retry = backend_fn(kw, max_results)
-                    if retry:
-                        for r in retry:
-                            if r.link not in seen_links:
-                                all_results.append(r)
-                                seen_links.add(r.link)
-                        backends_used.append(r.source)
-                if all_results:
-                    break
+    for name, _call in providers:
+        added = False
+        for result in batches.get(name, []):
+            if not result.link or result.link in seen_links:
+                continue
+            all_results.append(result)
+            seen_links.add(result.link)
+            added = True
+            if len(all_results) >= max_results:
+                break
+        if added:
+            backends_used.append(name)
+        if len(all_results) >= max_results:
+            break
 
     # Truncate to max_results
     all_results = all_results[:max_results]
@@ -965,7 +957,7 @@ def search_results(query: str, max_results: int = 5) -> SearchResponse:
     )
 
 
-def fetch_page_text(url: str, timeout: int = 15, max_chars: int = 12000) -> dict:
+def fetch_page_text(url: str, timeout: float = WEB_TIMEOUT, max_chars: int = 12000) -> dict:
     """Download and extract a public page.
 
     Returns ``{"url", "text", "title", "success", "error"}``.  The URL passes
