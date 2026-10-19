@@ -216,8 +216,8 @@
     <datalist id="providerModels"></datalist>
   </div>
   <div class="settings-field">
-    <label for="providerKey">API key (optional for no-auth endpoints)</label>
-    <input id="providerKey" type="password" placeholder="Stored for this tab only" autocomplete="off">
+    <label for="providerKey" id="providerKeyLabel">Provider API key (required for presets; optional only for custom no-auth endpoints)</label>
+    <input id="providerKey" type="password" placeholder="Paste the selected provider's API key" autocomplete="off">
   </div>
   <label class="direct-option" for="providerDirect">
     <input id="providerDirect" type="checkbox">
@@ -256,6 +256,7 @@ const providerModel = document.getElementById('providerModel');
 const providerModels = document.getElementById('providerModels');
 const modelsLoad = document.getElementById('modelsLoad');
 const providerKey = document.getElementById('providerKey');
+const providerKeyLabel = document.getElementById('providerKeyLabel');
 const providerDirect = document.getElementById('providerDirect');
 const providerNote = document.getElementById('providerNote');
 const conversationHistory = [];
@@ -274,6 +275,34 @@ function providerConfig(){
   const model = (sessionStorage.getItem('ii.provider.model') || '').trim();
   const api_key = sessionStorage.getItem('ii.provider.key') || '';
   return api_url && model ? {api_url, model, api_key} : null;
+}
+
+function presetForApiUrl(apiUrl){
+  if (!apiUrl) return null;
+  try {
+    const target = completionUrl(apiUrl);
+    return PROVIDER_PRESETS.find(preset => completionUrl(preset.api_url) === target) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function providerCredentialError(provider){
+  const preset = provider && presetForApiUrl(provider.api_url);
+  if (!preset || String(provider.api_key || '').trim()) return '';
+  return `${preset.name} requires its own API key. A free-labelled model is free-tier, not anonymous; signing in to the provider website does not send that login to II.`;
+}
+
+function updateProviderKeyHelp(){
+  const preset = PROVIDER_PRESETS.find(item => item.id === providerPreset.value)
+    || presetForApiUrl(providerUrl.value.trim());
+  if (preset) {
+    providerKeyLabel.textContent = `${preset.name} API key (required, including for free-labelled models)`;
+    providerKey.placeholder = `Paste your ${preset.name} API key`;
+  } else {
+    providerKeyLabel.textContent = 'Provider API key (optional only if this custom endpoint explicitly supports anonymous access)';
+    providerKey.placeholder = 'Paste the provider key, or leave blank only for a no-auth endpoint';
+  }
 }
 
 async function parseJsonResponse(response, label){
@@ -309,6 +338,16 @@ function redactProviderError(error, provider){
   let message = String(error && error.message ? error.message : error || 'unknown error');
   if (provider && provider.api_key) message = message.split(provider.api_key).join('[REDACTED]');
   return message.slice(0, 500);
+}
+
+function providerFailureMessage(error, provider){
+  const detail = redactProviderError(error, provider);
+  if ([401, 403].includes(error && error.status) || /\b(cookie auth|unauthori[sz]ed|invalid (?:api )?key|authentication)\b/i.test(detail)) {
+    const preset = provider && presetForApiUrl(provider.api_url);
+    const name = preset ? preset.name : 'The provider';
+    return `${name} rejected the API credentials. Paste a valid provider API key in BYOK settings; a free-labelled model still requires authentication. Provider detail: ${detail}`;
+  }
+  return detail;
 }
 
 function completionUrl(apiUrl){
@@ -508,9 +547,17 @@ async function serverChat(requestBody){
 function updateEngineStatus(){
   const browserProvider = providerConfig();
   const serverProvider = serverStatus && serverStatus.hybrid_chat_configured;
+  const credentialError = providerCredentialError(browserProvider);
+  if (browserProvider && credentialError) {
+    const preset = presetForApiUrl(browserProvider.api_url);
+    backendStatus.textContent = `BYOK incomplete — ${preset ? preset.name : 'provider'} API key required`;
+    backendStatus.className = 'error';
+    empty.textContent = credentialError;
+    return;
+  }
   if (browserProvider || serverProvider) {
     const model = browserProvider ? browserProvider.model : 'server BYOK';
-    backendStatus.textContent = `Hybrid chat + II tools \u2014 ${model}`;
+    backendStatus.textContent = `BYOK configured + II tools \u2014 ${model}`;
     backendStatus.className = 'ready';
     empty.textContent = 'General conversation is handled by your BYOK model. For factual and complex work it can call II\u2019s search, research, solver, synthesis, static verification, and repository tools.';
   } else {
@@ -536,20 +583,29 @@ const savedDirect = sessionStorage.getItem('ii.provider.direct');
 providerDirect.checked = savedDirect === null
   ? location.hostname.endsWith('.e2b.app')
   : savedDirect === 'true';
-const savedPreset = PROVIDER_PRESETS.find(preset => preset.api_url === providerUrl.value);
+const savedPreset = presetForApiUrl(providerUrl.value);
 providerPreset.value = savedPreset ? savedPreset.id : 'custom';
+updateProviderKeyHelp();
 
 providerPreset.onchange = () => {
   const preset = PROVIDER_PRESETS.find(item => item.id === providerPreset.value);
-  if (!preset) return;
-  providerUrl.value = preset.api_url;
-  providerModel.value = '';
-  providerModels.replaceChildren();
-  providerNote.textContent = preset.note || '';
+  if (preset) {
+    providerUrl.value = preset.api_url;
+    providerModel.value = '';
+    providerModels.replaceChildren();
+    providerNote.textContent = preset.note || '';
+  } else {
+    providerUrl.value = '';
+    providerModel.value = '';
+    providerModels.replaceChildren();
+    providerNote.textContent = 'Enter an OpenAI-compatible endpoint. Leave the key blank only if that endpoint explicitly allows anonymous requests.';
+  }
+  updateProviderKeyHelp();
 };
 providerUrl.addEventListener('input', () => {
-  const match = PROVIDER_PRESETS.find(preset => preset.api_url === providerUrl.value.trim());
+  const match = presetForApiUrl(providerUrl.value.trim());
   providerPreset.value = match ? match.id : 'custom';
+  updateProviderKeyHelp();
 });
 
 document.getElementById('settingsOpen').onclick = () => settingsDialog.showModal();
@@ -560,12 +616,19 @@ modelsLoad.onclick = async () => {
     providerNote.textContent = 'Choose a provider or enter its API URL first.';
     return;
   }
+  const selected = PROVIDER_PRESETS.find(item => item.id === providerPreset.value)
+    || presetForApiUrl(apiUrl);
+  const provider = {api_url: apiUrl, api_key: providerKey.value};
+  const credentialError = providerCredentialError(provider);
+  if (credentialError) {
+    providerNote.textContent = credentialError;
+    providerKey.focus();
+    return;
+  }
   modelsLoad.disabled = true;
   modelsLoad.textContent = 'Loading…';
   providerNote.textContent = 'Requesting this provider\u2019s model catalog…';
   try {
-    const selected = PROVIDER_PRESETS.find(item => item.id === providerPreset.value);
-    const provider = {api_url: apiUrl, api_key: providerKey.value};
     if (selected && selected.models_url) provider.models_url = selected.models_url;
     const loadFromServer = async () => {
       const response = await fetch('/api/providers/models', {
@@ -576,11 +639,23 @@ modelsLoad.onclick = async () => {
     };
     let data;
     if (providerDirect.checked) {
-      try { data = await loadModelsDirect(provider, provider.models_url); }
-      catch (_) { data = await loadFromServer(); }
+      try {
+        data = await loadModelsDirect(provider, provider.models_url);
+      } catch (directError) {
+        // An HTTP response proves the browser reached the provider. Preserve its
+        // useful auth/model error instead of masking it with a server fallback.
+        if (directError.status) throw directError;
+        try {
+          data = await loadFromServer();
+        } catch (serverError) {
+          throw new Error(`Direct catalog connection failed: ${redactProviderError(directError, provider)}. Server catalog connection also failed: ${redactProviderError(serverError, provider)}`);
+        }
+      }
     } else {
-      try { data = await loadFromServer(); }
-      catch (_) {
+      try {
+        data = await loadFromServer();
+      } catch (serverError) {
+        if (![424, 502, 503, 504].includes(serverError.status)) throw serverError;
         providerNote.textContent = 'The server could not reach the provider; trying this browser directly…';
         data = await loadModelsDirect(provider, provider.models_url);
       }
@@ -595,7 +670,8 @@ modelsLoad.onclick = async () => {
     const via = data.transport === 'browser-direct' ? ' directly from the browser' : '';
     providerNote.textContent = `${data.count || 0} models loaded${via}. Type to filter; try “free” where labelled.`;
   } catch (error) {
-    providerNote.textContent = `Could not load models: ${redactProviderError(error, {api_key: providerKey.value})}. The provider may block browser CORS; you can enter a model ID manually.`;
+    const failedProvider = {api_url: apiUrl, api_key: providerKey.value};
+    providerNote.textContent = `Could not load models: ${providerFailureMessage(error, failedProvider)}. You can enter a valid model ID manually if this provider does not expose a catalog.`;
   } finally {
     modelsLoad.disabled = false;
     modelsLoad.textContent = 'Load models';
@@ -606,6 +682,14 @@ document.getElementById('providerSave').onclick = () => {
   const model = providerModel.value.trim();
   if ((apiUrl && !model) || (!apiUrl && model)) {
     providerNote.textContent = 'Provider API URL and model must be entered together.';
+    return;
+  }
+  const credentialError = apiUrl
+    ? providerCredentialError({api_url: apiUrl, api_key: providerKey.value})
+    : '';
+  if (credentialError) {
+    providerNote.textContent = credentialError;
+    providerKey.focus();
     return;
   }
   if (apiUrl) {
@@ -638,6 +722,7 @@ document.getElementById('providerClear').onclick = () => {
   providerPreset.value = 'custom';
   providerUrl.value = ''; providerModel.value = ''; providerKey.value = '';
   providerModels.replaceChildren();
+  updateProviderKeyHelp();
   providerNote.textContent = 'BYOK configuration cleared.';
   conversationHistory.length = 0;
   updateEngineStatus();
@@ -770,14 +855,26 @@ async function sendMessage(){
     requestBody.provider = provider;
   }
   try{
+    const credentialError = providerCredentialError(provider);
+    if (credentialError) {
+      settingsDialog.showModal();
+      providerNote.textContent = credentialError;
+      providerKey.focus();
+      throw new Error(credentialError);
+    }
     let data;
     if (provider && providerDirect.checked) {
       try {
         data = await directHybridChat(text, provider, requestBody.history);
       } catch (directError) {
+        // Do not hide an authoritative provider HTTP error (especially 401/403)
+        // behind an unrelated hosted-server network failure.
+        if (directError.status) {
+          throw new Error(providerFailureMessage(directError, provider));
+        }
         try { data = await serverChat(requestBody); }
         catch (serverError) {
-          throw new Error(`Direct provider connection failed: ${redactProviderError(directError, provider)}. Server connection also failed: ${redactProviderError(serverError, provider)}`);
+          throw new Error(`Direct provider connection failed: ${providerFailureMessage(directError, provider)}. Server connection also failed: ${redactProviderError(serverError, provider)}`);
         }
       }
     } else {

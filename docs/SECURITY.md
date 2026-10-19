@@ -43,8 +43,11 @@ loading the page from disclosing the server credential.
   are rejected. Private/loopback endpoints require the operator-only
   `II_CHAT_ALLOW_PRIVATE_ENDPOINT=1` override.
 * **Load models** sends the same ephemeral key to the selected provider's
-  `GET /models` endpoint. Presets only supply base URLs; they do not grant free
-  access or bypass provider accounts, quotas, terms, or billing.
+  `GET /models` endpoint. Every built-in preset requires its provider API key;
+  a `free` model label describes pricing, not anonymous access. In particular,
+  an OpenCode website login cookie is not an OpenCode Zen API key. Presets only
+  supply base URLs; they do not grant access or bypass provider accounts,
+  quotas, terms, or billing.
 * Optional browser-direct transport sends the key, conversation, and returned
   tool outputs from the current tab directly to the selected HTTPS provider.
   It is intended for CORS-enabled providers when a hosted II server has blocked

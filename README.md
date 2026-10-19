@@ -226,9 +226,12 @@ open **BYOK settings** in the web UI. Presets include OpenRouter, OpenCode
 Zen/Go, Groq, Gemini, GitHub Models, Hugging Face, Cerebras, SambaNova, NVIDIA
 NIM, Together, DeepInfra, Fireworks, Mistral, xAI, and OpenAI; custom
 OpenAI-compatible endpoints remain supported. **Load models** asks the selected
-provider's `/models` endpoint so model IDs do not need to be hardcoded. Enter
-the provider key when required. The browser keeps configuration in tab-scoped
-session storage only.
+provider's `/models` endpoint so model IDs do not need to be hardcoded. Every
+built-in preset requires that provider's API key; a model labelled `free` is
+free-tier, not anonymous. In particular, signing in to the OpenCode website is
+not a substitute for creating and pasting an OpenCode Zen API key. Only a
+custom endpoint that explicitly supports anonymous requests can omit the key.
+The browser keeps configuration in tab-scoped session storage only.
 
 II does not bundle provider credits or promise that a model is free. Free tiers,
 quotas, tool-calling support, and model availability are controlled by each

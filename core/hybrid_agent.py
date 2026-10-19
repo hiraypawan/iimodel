@@ -40,19 +40,19 @@ PROVIDER_PRESETS: tuple[dict[str, str], ...] = (
         "id": "openrouter",
         "name": "OpenRouter",
         "api_url": "https://openrouter.ai/api/v1",
-        "note": "Multi-provider catalog; some models may have free variants.",
+        "note": "Requires an OpenRouter API key; free-labelled models still require authentication.",
     },
     {
         "id": "opencode-zen",
         "name": "OpenCode Zen",
         "api_url": "https://opencode.ai/zen/v1",
-        "note": "OpenCode-managed model catalog; account terms and availability vary.",
+        "note": "Requires an OpenCode Zen API key; signing in to the website alone is not enough, including for free-labelled models.",
     },
     {
         "id": "opencode-go",
         "name": "OpenCode Go",
         "api_url": "https://opencode.ai/zen/go/v1",
-        "note": "OpenCode's lower-cost coding-model plan.",
+        "note": "Requires an OpenCode API key and an eligible OpenCode Go account/plan.",
     },
     {
         "id": "groq",

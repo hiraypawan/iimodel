@@ -47,6 +47,8 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn(b"OpenRouter", page.data)
         self.assertIn(b"OpenCode Zen", page.data)
         self.assertIn(b"Load models", page.data)
+        self.assertIn(b"required for presets", page.data)
+        self.assertIn(b"free-labelled model is free-tier, not anonymous", page.data)
         self.assertIn(b"provider directly from this browser", page.data)
         self.assertIn("default-src 'self'", page.headers["Content-Security-Policy"])
         self.assertIn("connect-src 'self' https:", page.headers["Content-Security-Policy"])
