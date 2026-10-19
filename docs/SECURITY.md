@@ -27,9 +27,27 @@ acceptable on a machine where the server is bound to localhost. `GET
 /api/status` always reports which mode is active (`api_auth`), and starting
 the server with a non-localhost `--host` prints a loud warning.
 
-The local chat page injects the configured key into the page it serves so the
-browser UI keeps working on the same machine; the key protects the API from
-*other* hosts, not from the person sitting at the keyboard.
+The chat page never embeds `II_API_KEY` in HTML. When authentication is
+enabled, enter the II server key in the page's settings; it is retained only in
+tab-scoped `sessionStorage` and sent as `X-II-API-Key`. This keeps merely
+loading the page from disclosing the server credential.
+
+## OpenAI-compatible BYOK
+
+* UI-supplied provider URL, model, and key are kept in browser `sessionStorage`
+  (the current tab only) and sent with chat requests. II does not write them to
+  disk, logs, response bodies, memory, or tool traces.
+* Server-side deployments may use `II_CHAT_API_URL`, `II_CHAT_MODEL`, and
+  `II_CHAT_API_KEY`; `/api/status` reveals only whether configuration exists.
+* User-supplied endpoints must resolve to a public HTTP(S) address. Redirects
+  are rejected. Private/loopback endpoints require the operator-only
+  `II_CHAT_ALLOW_PRIVATE_ENDPOINT=1` override.
+* The provider receives conversation text and tool outputs. Choose a provider
+  whose privacy and retention policy you accept.
+* Hybrid chat exposes only a safe tool allowlist. It never offers arbitrary
+  code execution to the hosted model.
+* Protect an exposed II server with `II_API_KEY`; otherwise another user could
+  submit requests using server-side BYOK credentials.
 
 ## Binding and exposure
 
@@ -48,22 +66,20 @@ II_PRIVATE=1 python app.py        # PowerShell: $env:II_PRIVATE="1"
 
 When enabled (values `1/true/yes/on`):
 
-- Model tools `search_web`, `read_url`, and `research` are refused, and web
-  tools are no longer offered to the model.
+- Internet tools `search_web`, `read_url`, and `research` are refused, hosted
+  BYOK calls are blocked, and web stages are no longer offered to the router.
 - HTTP routes `/api/search`, `/api/fetch`, `/api/research`, and
   `/api/repos/ingest` return **403**.
 - The agent's forced-search and search-synthesis fallbacks are skipped.
 - Repo ingestion also refuses when called from the CLI/library.
-- Local-only features keep working: GGUF/LM Studio chat, repository graph and
-  topology, blackboard, static verification, Z3 explicit formulas, bounded
+- Local-only features keep working: conversational replies, repository graph
+  and topology, blackboard, static verification, Z3 explicit formulas, bounded
   synthesis, and code execution (subject to the sandbox settings below).
 
-Consequences: agentic mode (which answers purely from web search) cannot
-answer under private mode without a local model backend, and current-events
-answers will be stale. `GET /api/status` reports `private_mode` and
-`web_tools_enabled` so the UI/operators can verify the state. LM Studio, if
-used, must itself be local for the setup to be network-free; a GGUF backend
-makes no network calls in II's code.
+Consequences: factual questions that require external evidence fail closed
+under private mode, and current-events questions cannot be answered.
+`GET /api/status` reports `private_mode` and `web_tools_enabled` so the
+UI/operators can verify the state.
 
 ## SSRF guard on URL fetching
 

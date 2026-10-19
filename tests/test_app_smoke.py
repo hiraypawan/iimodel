@@ -1,10 +1,11 @@
 """Offline Flask smoke tests with assertions on response bodies.
 
-No local model weights or external web requests are required. The chat route is
-explicitly tested in demo mode so the test never claims that a real model ran.
+No model weights, provider calls, or external web requests are required for
+these smoke tests; hosted chat is mocked where exercised.
 """
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -38,20 +39,35 @@ class AppSmokeTests(unittest.TestCase):
         app_module.STATE = None
         app_module.SHARDER = None
 
-    def test_chat_page_and_demo_backend_status(self):
+    def test_chat_page_and_deterministic_engine_status(self):
         page = self.client.get("/")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Local tool-augmented agent prototype", page.data)
+        self.assertIn(b"Pure Internet Intelligence", page.data)
+        self.assertIn(b"OpenAI-compatible BYOK", page.data)
+        self.assertIn("default-src 'self'", page.headers["Content-Security-Policy"])
+        self.assertEqual(page.headers["Referrer-Policy"], "no-referrer")
 
         status = self.client.get("/api/status")
         self.assertEqual(status.status_code, 200)
         body = status.get_json()
-        self.assertEqual(body["backend"], "demo")
-        self.assertFalse(body["chat_ready"])
-        self.assertIn("huggingface.co/Qwen/", body["setup_message"])
+        self.assertEqual(body["backend"], "deterministic-tools")
+        self.assertTrue(body["engine_ready"])
+        self.assertTrue(body["chat_ready"])
+        self.assertFalse(body["model_required"])
+        self.assertIn("hybrid_chat_configured", body)
+        self.assertEqual(body["hybrid_chat_mode"], "openai-compatible-byok")
+        self.assertIsNone(body["setup_message"])
         self.assertEqual(body["version"], "3.0")
         self.assertIn("logic_tree", body["pipeline_stages"])
-        self.assertIn("renderer", body["llm_role"])
+        self.assertIn("deterministic_renderer", body["pipeline_stages"])
+        self.assertIn("OpenAI-compatible BYOK", body["llm_role"])
+
+    def test_chat_page_never_embeds_server_api_key(self):
+        with patch.dict(os.environ, {"II_API_KEY": "server-secret-must-not-leak"}):
+            page = self.client.get("/")
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn(b"server-secret-must-not-leak", page.data)
+        self.assertIn(b"II server API key", page.data)
 
     def test_pure_ii_chat_fails_closed_without_sources(self):
         # II_PRIVATE makes this deterministic and offline: the Pure II
@@ -68,6 +84,19 @@ class AppSmokeTests(unittest.TestCase):
         self.assertNotIn("As an AI", body["response"])
         self.assertEqual(body["sources"], [])
 
+    def test_greeting_uses_instant_local_chat_path(self):
+        with patch("reasoning.logic_tree_solver.LogicTreeSolver.solve") as solve:
+            response = self.client.post("/api/chat", json={"message": "hii"})
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["intent"], "chat")
+        self.assertEqual(body["pipeline"], "pure_ii:chat_fast")
+        self.assertEqual(body["response_kind"], "greeting")
+        self.assertEqual(body["status"], "SUPPORTIVE_INFORMATION")
+        self.assertIn("Hi!", body["response"])
+        self.assertIn("GGUF model", body["response"])
+        solve.assert_not_called()
+
     def test_legacy_chat_reports_demo_instead_of_faking_model_output(self):
         # The legacy tool-calling path still reports demo mode rather than
         # inventing an answer or silently falling back to web search.
@@ -81,10 +110,83 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn("no local model backend is available", body["response"])
         self.assertIn("LM Studio", body["response"])
 
+    def test_hybrid_byok_chat_uses_provider_without_echoing_key(self):
+        hybrid_result = {
+            "response": "A tool-assisted answer.",
+            "status": "PARTIAL",
+            "intent": "hybrid_chat",
+            "pipeline": "hybrid:openai-compatible",
+            "response_kind": "tool_assisted",
+            "tool_trace": [{"tool": "search_web", "ok": True}],
+            "sources": [{"url": "https://example.org"}],
+        }
+        with patch("core.hybrid_agent.HybridAgent.run", return_value=hybrid_result) as run:
+            response = self.client.post("/api/chat", json={
+                "message": "what is current?",
+                "history": [{"role": "user", "content": "hello"}],
+                "provider": {
+                    "api_url": "https://provider.example/v1",
+                    "model": "example/model",
+                    "api_key": "super-secret",
+                },
+            })
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["pipeline"], "hybrid:openai-compatible")
+        self.assertEqual(body["response"], "A tool-assisted answer.")
+        self.assertNotIn("super-secret", response.get_data(as_text=True))
+        run.assert_called_once_with(
+            "what is current?",
+            history=[{"role": "user", "content": "hello"}],
+        )
+
+    def test_explicit_pure_ii_pipeline_bypasses_server_byok(self):
+        with patch.dict(os.environ, {
+            "II_CHAT_API_URL": "https://provider.example/v1",
+            "II_CHAT_MODEL": "hosted-model",
+            "II_CHAT_API_KEY": "server-secret",
+        }):
+            response = self.client.post(
+                "/api/chat",
+                json={"message": "hii", "pipeline": "pure_ii"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["pipeline"], "pure_ii:chat_fast")
+
+    def test_incomplete_byok_configuration_is_rejected(self):
+        response = self.client.post("/api/chat", json={
+            "message": "hello",
+            "provider": {"api_key": "key-without-endpoint"},
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["code"], "invalid_provider_config")
+
+        bad_url = self.client.post("/api/chat", json={
+            "message": "hello",
+            "pipeline": "hybrid",
+            "provider": {"api_url": "file:///tmp/model", "model": "bad"},
+        })
+        self.assertEqual(bad_url.status_code, 400)
+        self.assertEqual(bad_url.get_json()["code"], "invalid_provider_config")
+
     def test_empty_chat_is_rejected(self):
         response = self.client.post("/api/chat", json={"message": "  "})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["error"], "empty message")
+
+    def test_chat_rejects_malformed_envelopes(self):
+        cases = [
+            (["not", "an", "object"], "request body"),
+            ({"message": 123}, "empty message"),
+            ({"message": "hello", "pipeline": {}}, "pipeline"),
+            ({"message": "hello", "pipeline": "mystery"}, "unsupported pipeline"),
+            ({"message": "hello", "provider": "not-an-object"}, "provider"),
+        ]
+        for payload, marker in cases:
+            with self.subTest(payload=payload):
+                response = self.client.post("/api/chat", json=payload)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(marker, response.get_json()["error"])
 
     def test_repository_index_and_state_endpoints(self):
         graph = self.client.get("/api/graph")
@@ -132,7 +234,7 @@ class AppSmokeTests(unittest.TestCase):
     def test_build_requires_a_real_backend(self):
         response = self.client.post("/api/build", json={"task": "write a function"})
         self.assertEqual(response.status_code, 503)
-        self.assertIn("No language-model backend", response.get_json()["error"])
+        self.assertIn("legacy generative endpoint", response.get_json()["error"])
 
     def test_verification_api_reports_static_checks_only(self):
         response = self.client.post(

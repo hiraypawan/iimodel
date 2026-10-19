@@ -126,6 +126,7 @@ class RouterStatusTests(unittest.TestCase):
             "write a function that parses csv",
             "brainstorm ideas for a solar pump",
             "hello there",
+            "hii",
         ):
             first = classify_intent(prompt)
             second = classify_intent(prompt)
@@ -136,6 +137,10 @@ class RouterStatusTests(unittest.TestCase):
             })
             self.assertGreaterEqual(first[1], 0.0)
             self.assertLessEqual(first[1], 1.0)
+
+    def test_greeting_variants_are_chat_not_web_research(self):
+        for prompt in ("hi", "hii", "hiii", "hello", "namaste", "good morning"):
+            self.assertEqual(classify_intent(prompt), ("chat", 1.0))
 
     def test_simple_factual_detection_is_deterministic(self):
         self.assertTrue(is_simple_factual("What is the capital of France?"))

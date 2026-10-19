@@ -35,7 +35,7 @@ SPDX parser.
 ## Third-party runtime dependencies
 
 II v3.0 depends on the packages listed in `requirements-core.txt`
-(Flask, Requests, NetworkX, trafilatura, duckduckgo-search, spaCy,
+(Flask, Requests, NetworkX, trafilatura, ddgs, spaCy,
 VADER, faiss-cpu, z3-solver, jsonschema, tree-sitter grammars and
 llama-cpp-python). Each is distributed under its own licence; see the
 upstream projects. Model weights are **not** bundled and remain under their

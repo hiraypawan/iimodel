@@ -1,36 +1,31 @@
-# II v3.0 — Pure Internet Intelligence (Deterministic Reasoning System)
+# II v3.0 — Pure Internet Intelligence (Hybrid Assistant + Tools)
 
-**II = Internet Intelligence.** II is a local, deterministic reasoning system
-where "thinking" means *Python algorithms + live internet data + graph
-traversal + Z3 solving + DAG orchestration*. **The LLM never reasons.**
+**II = Internet Intelligence.** II's tool engine combines live internet data,
+Python algorithms, graph traversal, Z3 solving, and DAG orchestration. Those
+project tools remain the authority for research and computed work; no GGUF
+weights or LM Studio installation is required.
 
-II is a **truth instrument**, not a thinking companion.
+For unrestricted conversation and dynamic tool selection, II supports
+**ephemeral BYOK with any OpenAI-compatible model**. The hosted model interprets
+and renders; II's tools search, fetch, solve, synthesize, and inspect. Provider
+credentials are supplied in the UI for the current browser tab or through
+environment variables, and are never written to the repository or database.
 
 ---
 
-## The 1.5B LLM is the renderer
+## Hybrid chat + the II tool engine
 
-> The 1.5B LLM is the renderer: it formats structured JSON into natural
-> language and generates sandbox-verified code snippets. All reasoning, logic,
-> and conclusions come from deterministic Python algorithms.
+1. **Conversation and planning** — the user's OpenAI-compatible BYOK model
+   handles general language and chooses a project tool when needed.
+2. **Retrieval and execution** — live sources, graph algorithms, constraint
+   solvers, and bounded tools perform the actual work.
+3. **Tool-grounded rendering** — web-derived claims must use the evidence and
+   citations returned by II. Failed retrieval must be reported, not filled in.
+4. **Deterministic fallback** — without BYOK, the existing narrow router remains
+   available for greetings and supported research/solver pipelines.
 
-The local model (Qwen2.5-1.5B GGUF or an LM Studio server) does exactly two
-things:
-
-1. **Formatting** — turn the structured JSON produced by the algorithms into
-   natural Hinglish/English. The system prompt says, verbatim:
-   *"Stick strictly to the provided JSON. Do not add facts, ideas, or
-   conclusions."*
-2. **Constrained code generation** — short snippets (simulations, tool code,
-   bug fixes) from precise specs. **All generated code is sandbox-verified
-   before use.**
-
-Forbidden for the model: open-ended ideation, factual claims, logical
-conclusions, brainstorming, opinions.
-
-Everything the model writes is checked by a **hallucination detector**
-(entity diff). A rejected rendering is discarded, retried once, and finally
-replaced with a dump of the raw JSON — the answer is never silently kept.
+Generated or simulated code still follows the project's verification and
+sandbox rules.
 
 ---
 
@@ -44,6 +39,8 @@ replaced with a dump of the raw JSON — the answer is never silently kept.
 | `UNVALIDATED_COMBINATION` | A brainstorming output. The components are cited; **the combination is not validated**. |
 | `CONFLICT` | Sources disagree. Both sides are shown with URLs. **No answer is forced.** |
 | `INSUFFICIENT_DATA` | Fail-closed. Nothing was invented to fill the gap. |
+| `SUPPORTIVE_INFORMATION` | A conversational or supportive response; no factual web claim is being marked verified. |
+| `CRISIS_RESOURCES` | Immediate crisis-support information; no other pipeline runs. |
 
 **Fail-closed wins.** The system never returns an empty answer: it returns
 `PARTIAL` (steps taken + sources found) and states exactly what is missing.
@@ -53,20 +50,21 @@ replaced with a dump of the raw JSON — the answer is never silently kept.
 
 ## Honest capability statement
 
-II is designed to be stronger than large AI models at:
+II's deterministic tools are designed to complement hosted language models
+with:
 
-* **live, cited facts** — every claim carries its URL,
-* **hallucination-resistant Q&A** — fail-closed by design; every claim
-  is cited and entity-checked,
-* **local repository analysis** — the index, topology and verification run on
+* **live, cited research** — retrieved claims retain their source URLs,
+* **fail-closed factual paths** — deterministic research abstains when it lacks
+  evidence instead of filling gaps,
+* **local repository analysis** — indexing, topology, and verification run on
   your machine,
-* **privacy** — the model runs locally; the Exocortex stores only what you
-  approve,
-* **cost** — no model API costs; search backends have free tiers and then
-  paid tiers,
-* **debuggability** — every stage is a Python function you can read and run.
+* **user-controlled memory** — the Exocortex stores only what you approve,
+* **debuggability** — every tool stage is a Python function you can inspect.
 
-II does **NOT** match large AI models at:
+Privacy and cost depend on your chosen search and BYOK providers. In hybrid
+mode, the provider receives conversation text and any tool output returned to
+it. Without BYOK, II's deterministic fallback does **not** match a capable
+language model at:
 
 * nuanced reasoning,
 * creative writing,
@@ -81,58 +79,49 @@ has been measured in a way that would justify the number.
 
 ---
 
-## The II Way vs The AI Way
+## Hybrid II vs hosted-model-only chat
 
-| | The II Way | The AI Way |
+| | Hybrid II | Hosted-model-only chat |
 |---|---|---|
-| Where the answer comes from | Deterministic algorithms over live sources | Model weights |
-| Citations | Every factual claim carries a URL | Optional, often absent |
-| When the model is wrong | The rendering is rejected by the entity diff and re-generated | The wrong text stands |
-| Unknown data | `INSUFFICIENT_DATA` — the gap is named | Plausible-sounding text |
-| Multi-hop questions | Decomposed into ordered hops with a dependency graph | One prompt, one shot |
-| Memory | Opt-in, on disk, visible, deletable | Implicit, opaque |
-| Code you did not write | Executed only in the fail-closed Docker sandbox | Executed at the model's discretion |
-| Creative work | Mechanical recombination, explicitly labelled `UNVALIDATED_COMBINATION` | Presented as an idea |
-| Cost | No model API costs; search backends may become paid | Usually paid per token |
-| Failure mode | Fails closed and shows the work | Fails silently and sounds confident |
+| Conversation | User-selected OpenAI-compatible model | Hosted model |
+| Current facts | Model calls II search/research tools | Depends on provider features |
+| Citations | II preserves URLs returned by retrieval | Optional, often absent |
+| Tool failure | Exposed in `tool_trace`; an all-failed run discards the model's attempted factual answer | Provider-dependent |
+| Deterministic work | Project graph, Z3, bounded synthesis, and verification tools | Provider-dependent |
+| Memory | Opt-in, on disk, visible, deletable | Provider-dependent |
+| Code execution | Not exposed to the hosted model's safe tool allowlist | Provider-dependent |
+| Cost and privacy | Depend on the chosen BYOK and search providers | Depend on the provider |
 
-**The AI Way wins at nuance, creativity and conversation.** II is not trying to
-replace it; II is trying to be *checkable*.
+The hosted model supplies the language fluency that deterministic II lacks; II
+adds inspectable project tools and conservative failure handling.
 
 ---
 
 ## Architecture
 
 ```text
-                      user request
-                           │
-                 ┌─────────▼─────────┐
-                 │  core/ii_agent.py │  router: crisis → fast path →
-                 │   route_task()    │  memory → interviewer → intent → DAG
-                 └─────────┬─────────┘
-                           │
-        ┌──────────────────┼───────────────────────┐
-        │                  │                       │
-  crisis scan      fast path (simple          DAG (core/dag_planner.py)
-  (empathy)        factual question)           asyncio, parallel branches
-        │                  │                       │
-        │                  │        ┌──────────────┼───────────────┐
-        │                  │        │              │               │
-        │                  │  logic tree     exocortex recall   interviewer
-        │                  │  (hop by hop)   (opt-in memory)  (≤2 questions)
-        │                  │        │              │               │
-        │                  └────────┴──────────────┴───────────────┘
-        │                                  │
-        │                       deterministic JSON result
-        │                                  │
-        │                  ┌───────────────▼────────────────┐
-        │                  │ core/caged_renderer.py          │
-        │                  │ strict prompt + entity-diff     │
-        │                  │ detector; reject → retry → dump  │
-        │                  └───────────────┬────────────────┘
-        ▼                                  ▼
-   crisis resources              natural-language answer
-   (nothing else runs)           with citations
+                           user request
+                                │
+                         app.py /api/chat
+                                │
+                ┌───────────────┴────────────────┐
+                │ BYOK configured?              │ no
+               yes                               ▼
+                │                    core/ii_agent.py
+                ▼                    deterministic fallback
+       core/hybrid_agent.py                    │
+       bounded tool-call loop      crisis / fast paths / intent / DAG
+                │                               │
+     ┌──────────┴──────────┐         search / graph / solvers / memory
+     │                     │                    │
+OpenAI-compatible     safe II tools             ▼
+hosted model       search / research /     deterministic renderer
+conversation +     graph / Z3 / synthesis       │
+planning           / static verification        │
+     └──────────┬─────────┘                      │
+                ▼                                ▼
+       tool-aware response              narrow fallback response
+       + sources + trace                + status + sources
 ```
 
 ### Package layout (Phase 0 consolidation)
@@ -140,7 +129,7 @@ replace it; II is trying to be *checkable*.
 | Path | Contents |
 |---|---|
 | `main.py`, `app.py`, `bootstrap.py` | The only root-level Python files. |
-| `core/` | Router (`ii_agent.py`), state, security, model adapter, DAG planner, critic loop, caged renderer, NLP helpers. |
+| `core/` | Hybrid agent (`hybrid_agent.py`), deterministic fallback router, state, security, DAG planner, renderer, and NLP helpers. |
 | `reasoning/` | Logic-tree solver, Z3 adapter, constraint compiler, verification cascade, bounded synthesis, TF-IDF utilities. |
 | `ingestion/` | Web search/fetch (`ii_web.py`), repository ingestion, license screening. |
 | `interaction/` | Interviewer, empathy module, brainstorming engine. |
@@ -201,8 +190,7 @@ The same view is available at `GET /api/memory` and `POST /api/memory/forget`.
 
 ## Install and run
 
-**Requirements**: Python 3.11+. A local model is *optional* — without one II
-renders structured results deterministically instead of through the LLM.
+**Requirements**: Python 3.11+. Deterministic tools need no model weights. General chat requires a BYOK OpenAI-compatible endpoint.
 
 ### macOS / Linux
 
@@ -231,9 +219,10 @@ python app.py                 # 127.0.0.1:5000
 python app.py --host 0.0.0.0  # prints a loud exposure warning
 ```
 
-Model weights are **not** bundled and are never downloaded automatically. For
-local GGUF chat, place a compatible file in `models/` and install
-`llama-cpp-python`, or start LM Studio at `http://127.0.0.1:1234`.
+II starts directly with its internet-and-tools engine. To enable general chat,
+open **BYOK settings** in the web UI and enter the provider URL, model name,
+and optional API key. The browser keeps these values in session storage only.
+Alternatively, configure the server environment variables below.
 
 ### Environment switches
 
@@ -244,6 +233,12 @@ local GGUF chat, place a compatible file in `models/` and install
 | `II_CODE_SANDBOX=docker` | Run generated code in the fail-closed Docker sandbox. `subprocess` (the default) is **not** a sandbox. |
 | `II_REQUIRE_SANDBOX=1` | Refuse to execute code in subprocess mode at all. |
 | `II_DATA_DIR` | Where the Exocortex stores its database and vector index. |
+| `II_WEB_TIMEOUT` | Per-provider search/fetch deadline in seconds (default `4`, bounded to `1..15`). |
+| `II_CHAT_API_URL` | Server-side OpenAI-compatible base URL or full `/chat/completions` URL. |
+| `II_CHAT_MODEL` | Provider model name used for hybrid chat. |
+| `II_CHAT_API_KEY` | Provider key; optional for no-auth endpoints. Never returned by the API. |
+| `II_CHAT_TIMEOUT` | Hosted-provider timeout in seconds (default `60`, bounded to `5..180`). |
+| `II_CHAT_ALLOW_PRIVATE_ENDPOINT=1` | Explicitly allow a private/local BYOK endpoint; off by default to prevent SSRF. |
 
 The server binds to **127.0.0.1 by default**. `--host` with any other address
 prints a loud warning, because the API is a local research tool.
@@ -359,8 +354,8 @@ Read [`docs/SECURITY.md`](docs/SECURITY.md) before exposing the server.
 * The verification cascade fails closed unless caller-supplied test and
   entailment adapters are provided.
 * Simulated hypotheses are toy-model estimates, never empirical proof.
-* Model weights remain under their own licence. This project's code is MIT
-  (see [`LICENSE`](LICENSE)); see [`docs/VENDOR_CREDITS.md`](docs/VENDOR_CREDITS.md).
+* This project's code is MIT (see [`LICENSE`](LICENSE)); third-party libraries
+  retain their own licences (see [`docs/VENDOR_CREDITS.md`](docs/VENDOR_CREDITS.md)).
 
 ## Project plan
 

@@ -1,13 +1,13 @@
 """
-app.py — II local tool-augmented agent prototype.
+app.py — II Pure Internet Intelligence server.
 
-The Flask UI can use a user-provided GGUF through llama-cpp-python or a local
-LM Studio server. Without either backend, it starts in demo mode. Web search
-and URL fetching make external network requests when those tools are used.
+II combines an internet-and-tools engine with optional ephemeral BYOK for any
+OpenAI-compatible model. The hosted model handles general conversation and
+tool planning; project tools perform retrieval, graph work, solving and
+verification. No bundled GGUF weights or LM Studio installation is required.
 
-The API exposes experimental helpers for repository indexing, structured
-constraint solving, bounded expression synthesis, and state inspection. These
-helpers do not turn the application into a new foundation model.
+The API also exposes helpers for repository indexing, structured constraint
+solving, bounded expression synthesis, and state inspection.
 """
 
 from __future__ import annotations
@@ -23,25 +23,6 @@ from pathlib import Path
 from typing import Optional
 
 from flask import Flask, render_template, request, jsonify
-
-# --------------------------------------------------------------------------- #
-# Check for optional llama-cpp-python backend
-# --------------------------------------------------------------------------- #
-def _ensure_llama_cpp():
-    """Try to import llama-cpp-python. If missing, do NOT auto-install from source
-    (building requires Visual Studio C++ Build Tools). Just report and let the
-    system fall back to demo mode or LM Studio."""
-    try:
-        import llama_cpp  # noqa: F401
-        print("[OK] llama-cpp-python already installed.")
-        return True
-    except ImportError:
-        print("[INFO] llama-cpp-python not installed. Real GGUF model will not load.")
-        print("         Install manually: pip install llama-cpp-python --only-binary=:all:")
-        print("         Or use LM Studio at http://127.0.0.1:1234 instead.")
-        return False
-
-_ensure_llama_cpp()
 
 # --------------------------------------------------------------------------- #
 # Make sibling modules importable
@@ -63,9 +44,6 @@ from core.ii_state import StateManager  # noqa: E402
 from reasoning.ii_constraints import ConstraintSharder, default_constraints  # noqa: E402
 from graph.topology import GraphTopologyAnalyzer  # noqa: E402
 from reasoning.verification_cascade import VerificationCascade  # noqa: E402
-
-# Local GGUF model backend (supports llama-cpp-python, LM Studio, or demo fallback)
-from core.llama_local import LocalModel  # noqa: E402
 
 # Optional helper modules
 try:
@@ -117,6 +95,24 @@ def _active_tools() -> list:
 # Flask app
 # --------------------------------------------------------------------------- #
 app = Flask(__name__, template_folder="templates", static_folder="static")
+
+
+@app.after_request
+def _security_headers(response):
+    """Apply browser hardening without changing API response contracts."""
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=()",
+    )
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; base-uri 'none'; form-action 'self'; "
+        "connect-src 'self'; img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
+    )
+    return response
 
 
 # --------------------------------------------------------------------------- #
@@ -174,24 +170,16 @@ VISION = None
 BLACKBOARD = None
 
 WORKDIR = _HERE
-MODEL_FILENAME = "qwen2.5-1.5b-instruct-q4_0.gguf"
-MODEL_PATH = WORKDIR / "models" / MODEL_FILENAME
-MODEL_REPOSITORY_URL = "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF"
-MODEL_FILE_URL = (
-    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/"
-    "qwen2.5-1.5b-instruct-q4_0.gguf?download=true"
-)
-LMSTUDIO_URL = "http://127.0.0.1:1234"
 
 # --------------------------------------------------------------------------- #
-# Tool definitions (exposed to the model)
+# Tool definitions (legacy tool-calling API compatibility)
 # --------------------------------------------------------------------------- #
 TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search the web (Brave > SearXNG > DuckDuckGo > GitHub > Wikipedia). Returns citation-tagged results.",
+            "description": "Search concurrent web backends and return citation-tagged results.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
@@ -370,14 +358,11 @@ def dispatch_tool(name: str, args: dict) -> str:
 # Prompt assembly and setup guidance
 # --------------------------------------------------------------------------- #
 def model_setup_message() -> str:
+    """Compatibility message for removed GGUF-era generation endpoints."""
     return (
-        "No language-model backend is connected; II is in demo mode and cannot "
-        "answer prompts with an AI model.\n\n"
-        "Recommended: load Qwen2.5-1.5B-Instruct in LM Studio and start its "
-        f"OpenAI-compatible server at {LMSTUDIO_URL}.\n"
-        f"Alternative: download {MODEL_FILENAME} from {MODEL_FILE_URL} into "
-        f"{MODEL_PATH}, then install llama-cpp-python.\n"
-        f"Model repository: {MODEL_REPOSITORY_URL}"
+        "This legacy generative endpoint is disabled. Use hybrid chat with an "
+        "OpenAI-compatible BYOK provider instead; II will expose its safe "
+        "internet and project tools to that provider."
     )
 
 
@@ -512,7 +497,9 @@ def _execute_raw_tool_call(tool_call_dict: dict) -> str:
 # --------------------------------------------------------------------------- #
 @app.route("/")
 def index():
-    return render_template("chat.html", api_key=(os.environ.get("II_API_KEY") or "").strip())
+    # Never embed server credentials in HTML. Remote users enter II_API_KEY in
+    # tab-scoped settings when API authentication is enabled.
+    return render_template("chat.html")
 
 
 def _pipeline_stages() -> dict:
@@ -522,7 +509,6 @@ def _pipeline_stages() -> dict:
     are importable and its preconditions hold.
     """
     from core.nlp import HAS_SPACY, nlp_backend
-    from core.caged_renderer import STRICT_SYSTEM_PROMPT  # noqa: F401
 
     stages: dict[str, dict] = {}
 
@@ -574,10 +560,10 @@ def _pipeline_stages() -> dict:
         "tools.self_tool_builder -- requires the fail-closed Docker sandbox.",
     )
     stage(
-        "caged_renderer",
-        MODEL is not None and MODEL.mode in ("gguf", "lmstudio"),
-        "The renderer needs a local model; without one the deterministic "
-        "JSON renderer is used.",
+        "deterministic_renderer",
+        True,
+        "core.caged_renderer -- Python renders structured tool results; no "
+        "GGUF or external model is required.",
     )
     stage(
         "nlp",
@@ -589,15 +575,24 @@ def _pipeline_stages() -> dict:
 
 @app.route("/api/status", methods=["GET"])
 def api_status():
-    backend = MODEL.mode if MODEL is not None else "not_initialized"
+    from core.hybrid_agent import provider_configured
+
+    legacy_renderer = getattr(MODEL, "mode", None) if MODEL is not None else None
     return jsonify({
         "version": "3.0",
-        "identity": "II -- Pure Internet Intelligence (deterministic reasoning system)",
-        "backend": backend,
-        "chat_ready": backend in ("gguf", "lmstudio"),
-        "model_file_present": MODEL_PATH.is_file(),
-        "setup_message": None if backend in ("gguf", "lmstudio") else model_setup_message(),
+        "identity": "II -- Pure Internet Intelligence (hybrid assistant + tools)",
+        "backend": "deterministic-tools",
+        "engine_ready": True,
+        # Kept for older UI clients. Deterministic tools work without BYOK;
+        # unrestricted general chat is available when a provider is supplied.
+        "chat_ready": True,
+        "hybrid_chat_configured": provider_configured(),
+        "hybrid_chat_mode": "openai-compatible-byok",
+        "legacy_renderer": legacy_renderer,
+        "model_required": False,
+        "setup_message": None,
         "tools": {
+            "web": not is_private_mode(),
             "smt": _SMT_AVAILABLE,
             "synthesis": _SYNTH_AVAILABLE,
             "vision_prototype": _VISION_AVAILABLE,
@@ -605,19 +600,73 @@ def api_status():
         "private_mode": is_private_mode(),
         "web_tools_enabled": not is_private_mode(),
         "code_sandbox": sandbox_mode(),
-        "api_auth": "api-key" if api_key_configured() else "disabled (localhost only)",
+        "api_auth": "api-key" if api_key_configured() else "disabled",
         "pipeline_stages": _pipeline_stages(),
+        "reasoning_engine": (
+            "II tools perform internet retrieval, deterministic Python "
+            "algorithms, graph traversal, solvers, and DAG orchestration. "
+            "Optional BYOK provides general conversation and dynamic tool planning."
+        ),
+        # Backward-compatible field name for API consumers.
         "llm_role": (
-            "The 1.5B model is the renderer: it formats structured JSON into "
-            "natural language and generates sandbox-verified code snippets. "
-            "All reasoning, logic and conclusions come from deterministic "
-            "Python algorithms."
+            "No model is required for deterministic tools. An ephemeral "
+            "OpenAI-compatible BYOK provider enables general chat and planning."
         ),
     })
 
 
 # --------------------------------------------------------------------------- #
-# Pure II chat: the deterministic pipeline (default)
+# Hybrid BYOK chat: hosted language understanding + II project tools
+# --------------------------------------------------------------------------- #
+def _hybrid_chat(user_message: str, provider_data: dict | None, history):
+    from core.hybrid_agent import (
+        HybridAgent,
+        HybridProviderError,
+        ProviderConfig,
+    )
+
+    try:
+        config = ProviderConfig.from_sources(provider_data)
+    except ValueError as exc:
+        return jsonify({"error": str(exc), "code": "invalid_provider_config"}), 400
+    if config is None:
+        return jsonify({
+            "error": (
+                "General chat needs BYOK configuration: provide an OpenAI-compatible "
+                "API URL and model. The key is optional for providers that do not "
+                "require authentication."
+            ),
+            "code": "provider_not_configured",
+        }), 400
+    try:
+        result = HybridAgent(config).run(user_message, history=history)
+    except HybridProviderError as exc:
+        return jsonify({
+            "error": str(exc),
+            "code": "provider_error",
+            "response": (
+                "The BYOK provider could not complete this request. No fallback "
+                "answer was invented."
+            ),
+        }), 502
+
+    return jsonify({
+        **result,
+        "confidence": None,
+        "questions": [],
+        "constraint_tree": {},
+        "event_log": [],
+        "raw": {
+            "tool_trace": result.get("tool_trace", []),
+            "source_count": len(result.get("sources", [])),
+        },
+        "agentic": True,
+        "demo": False,
+    })
+
+
+# --------------------------------------------------------------------------- #
+# Pure II chat: deterministic fallback when BYOK is not configured
 # --------------------------------------------------------------------------- #
 def _pure_ii_chat(user_message: str):
     """Run the Pure II router and return its structured result."""
@@ -641,6 +690,7 @@ def _pure_ii_chat(user_message: str):
         "intent": result.get("intent"),
         "confidence": result.get("confidence"),
         "pipeline": result.get("pipeline"),
+        "response_kind": result.get("response_kind"),
         "questions": result.get("questions", []),
         "constraint_tree": result.get("constraint_tree", {}),
         "sources": result.get("sources", []),
@@ -654,13 +704,49 @@ def _pure_ii_chat(user_message: str):
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     data = request.get_json(force=True) or {}
-    user_message = (data.get("message") or "").strip()
-    if not user_message:
+    if not isinstance(data, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
+    raw_message = data.get("message")
+    if not isinstance(raw_message, str) or not raw_message.strip():
         return jsonify({"error": "empty message"}), 400
+    user_message = raw_message.strip()
+    if len(user_message) > 20000:
+        return jsonify({"error": "message exceeds the 20,000 character limit"}), 413
 
-    pipeline = (data.get("pipeline") or "pure_ii").strip().lower()
-    if pipeline in {"pure_ii", "pure-ii", "ii", "default"}:
+    raw_pipeline = data.get("pipeline", "default")
+    if raw_pipeline is None or raw_pipeline == "":
+        raw_pipeline = "default"
+    if not isinstance(raw_pipeline, str):
+        return jsonify({"error": "pipeline must be a string"}), 400
+    pipeline = raw_pipeline.strip().lower()
+    raw_provider = data.get("provider")
+    if raw_provider is not None and not isinstance(raw_provider, dict):
+        return jsonify({"error": "provider must be a JSON object"}), 400
+    provider_data = raw_provider
+    history = data.get("history")
+
+    # A request-supplied BYOK configuration takes priority. Server operators
+    # can alternatively configure II_CHAT_API_URL / II_CHAT_MODEL / key in the
+    # environment, in which case ProviderConfig resolves them here.
+    from core.hybrid_agent import ProviderConfig
+
+    try:
+        byok_available = ProviderConfig.from_sources(provider_data) is not None
+    except ValueError as exc:
+        return jsonify({"error": str(exc), "code": "invalid_provider_config"}), 400
+    if pipeline in {"hybrid", "byok"}:
+        return _hybrid_chat(user_message, provider_data, history)
+    if pipeline in {"pure_ii", "pure-ii", "ii"}:
         return _pure_ii_chat(user_message)
+    if pipeline == "default":
+        if byok_available:
+            return _hybrid_chat(user_message, provider_data, history)
+        return _pure_ii_chat(user_message)
+    if pipeline != "legacy":
+        return jsonify({
+            "error": "unsupported pipeline",
+            "supported": ["default", "hybrid", "pure_ii", "legacy"],
+        }), 400
 
     # ------------------------------------------------------------------ #
     # Legacy path: model-driven tool calling (kept for comparison and for
@@ -1493,10 +1579,10 @@ def api_hypothesize():
 def init_backend():
     global MODEL, KG, STATE, SHARDER, Z3, SYNTH, VISION, BLACKBOARD
     print("=" * 50)
-    print("  II local tool-augmented agent prototype")
+    print("  II Pure Internet Intelligence")
     print("=" * 50)
     print(f"Workdir : {WORKDIR}")
-    print(f"Model   : {MODEL_PATH}")
+    print("Engine  : II internet/tools + OpenAI-compatible BYOK chat")
     print(f"Z3 SMT solver   : {'available' if _SMT_AVAILABLE else 'NOT available'}")
     print(f"Program synth   : {'available' if _SYNTH_AVAILABLE else 'NOT available'}")
     print(f"MobileCLIP vision: {'available' if _VISION_AVAILABLE else 'NOT available'}")
@@ -1504,23 +1590,17 @@ def init_backend():
     print(f"Code execution mode: {sandbox_mode()} (default subprocess is NOT a sandbox)")
     print()
 
-    if not MODEL_PATH.is_file():
-        print(f"Model weights are not bundled; expected file: {MODEL_PATH}")
-        print(f"Download page: {MODEL_REPOSITORY_URL}")
-        print(f"Or use LM Studio at {LMSTUDIO_URL} with a compatible model loaded.")
-        print()
-
-    # Load model (auto-selects: llama-cpp-python -> LM Studio -> demo)
-    print("Loading model backend...")
-    MODEL = LocalModel(str(MODEL_PATH), n_ctx=4096, n_gpu_layers=0)
-    print(f"Backend mode: {MODEL.mode}")
-    if MODEL.mode == "gguf":
-        print("Real GGUF model loaded - full chat enabled.")
-    elif MODEL.mode == "lmstudio":
-        print("LM Studio connected - full chat enabled.")
-    else:
-        print("Demo mode - chat will show setup guidance, not model-generated answers.")
-        print(model_setup_message())
+    # Pure II deliberately does not initialise a language-model backend.  This
+    # keeps startup fast and makes the actual internet/tool engine the product,
+    # rather than presenting a missing GGUF file as a degraded "demo" mode.
+    MODEL = None
+    from core.hybrid_agent import provider_configured
+    print("II tool engine ready.")
+    print(
+        "Hybrid BYOK: "
+        + ("server configuration detected" if provider_configured()
+           else "configure any OpenAI-compatible model in the web UI")
+    )
 
     print("Building codebase knowledge graph...")
     KG = CodebaseKnowledgeGraph(str(WORKDIR))
@@ -1554,7 +1634,7 @@ def init_backend():
     print("Blackboard ready.")
 
     print()
-    print("[OK] II prototype server running at http://127.0.0.1:5000/")
+    print("[OK] II server running at http://127.0.0.1:5000/")
     print("   Open that URL in your browser to chat.")
     print("   Press Ctrl+C to stop the server.")
     print("=" * 50)
@@ -1579,7 +1659,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="II -- Pure Internet Intelligence (deterministic reasoning system)"
+        description="II -- Pure Internet Intelligence (hybrid assistant + tools)"
     )
     parser.add_argument("--host", default="127.0.0.1",
                         help="interface to bind (default: 127.0.0.1, localhost only)")

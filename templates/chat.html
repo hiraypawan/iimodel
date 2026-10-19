@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>II — Local AI Agent</title>
+<title>II — Pure Internet Intelligence</title>
 <style>
   :root {
     --bg: #0b0c10;
@@ -39,7 +39,32 @@
   .sub { font-size: 11px; color: var(--muted); margin-left: 6px; }
   #backendStatus { margin-left: auto; font-size: 11px; color: var(--muted); }
   #backendStatus.ready { color: var(--accent); }
-  #backendStatus.demo { color: #ffcc66; }
+  #backendStatus.error { color: #ffcc66; }
+  .settings-btn {
+    border: 1px solid var(--border); background: var(--input); color: var(--text);
+    border-radius: 7px; padding: 5px 9px; cursor: pointer; font-size: 12px;
+  }
+  .settings-btn:hover { border-color: var(--accent); color: var(--accent); }
+  dialog {
+    width: min(520px, calc(100vw - 32px)); border: 1px solid var(--border);
+    border-radius: 12px; background: var(--panel); color: var(--text);
+    padding: 20px; margin: auto;
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.72); }
+  dialog h2 { font-size: 17px; margin-bottom: 6px; }
+  dialog p { color: var(--muted); font-size: 12px; line-height: 1.5; margin-bottom: 16px; }
+  .settings-field { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+  .settings-field label { font-size: 12px; color: var(--muted); }
+  .settings-field input {
+    width: 100%; background: var(--input); border: 1px solid var(--border);
+    border-radius: 7px; color: var(--text); padding: 9px 10px; outline: none;
+  }
+  .settings-field input:focus { border-color: var(--accent); }
+  .settings-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .settings-actions button { border-radius: 7px; padding: 8px 13px; cursor: pointer; }
+  .secondary { border: 1px solid var(--border); color: var(--text); background: var(--input); }
+  .primary { border: none; color: #000; background: var(--accent); font-weight: 700; }
+  .provider-note { color: #ffcc66; min-height: 18px; font-size: 11px; }
 
   main { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
   .msg { max-width: 720px; display: flex; flex-direction: column; gap: 6px; }
@@ -56,6 +81,15 @@
   .msg.user .bubble { background: var(--user-bg); border: 1px solid var(--border); color: var(--text); }
   .msg.ii .bubble { background: var(--ii-bg); border: 1px solid var(--border); color: var(--text); }
   .meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .result-details {
+    max-width: 720px; font-size: 11px; color: var(--muted);
+    background: var(--ii-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 11px;
+  }
+  .result-details summary { cursor: pointer; color: var(--accent); }
+  .result-details ul { margin: 7px 0 0 18px; }
+  .result-details li { margin: 4px 0; overflow-wrap: anywhere; }
+  .result-details a { color: #8ab4f8; }
 
   code {
     font-family: "Consolas", "Monaco", "Courier New", monospace;
@@ -137,12 +171,45 @@
 <body>
 <header>
   <div class="dot"></div>
-  <h1>II<span class="sub">Local tool-augmented agent prototype</span></h1>
-  <span id="backendStatus" class="demo">Checking model backend…</span>
+  <h1>II<span class="sub">Pure Internet Intelligence</span></h1>
+  <span id="backendStatus">Starting II…</span>
+  <button class="settings-btn" id="settingsOpen" type="button">BYOK settings</button>
 </header>
 
+<dialog id="settingsDialog">
+  <h2>OpenAI-compatible BYOK</h2>
+  <p>
+    Add any OpenAI-compatible endpoint and model. The model handles general
+    conversation and chooses II's internet/project tools when needed. Your API
+    key stays in this browser tab's session storage. Each chat sends it to this
+    II server, which forwards it as bearer authentication to the provider.
+  </p>
+  <div class="settings-field">
+    <label for="iiApiKey">II server API key (only if the server uses II_API_KEY)</label>
+    <input id="iiApiKey" type="password" placeholder="Stored for this tab only" autocomplete="off">
+  </div>
+  <div class="settings-field">
+    <label for="providerUrl">Provider API base URL or full chat-completions URL</label>
+    <input id="providerUrl" type="url" placeholder="https://api.example.com/v1">
+  </div>
+  <div class="settings-field">
+    <label for="providerModel">Model name</label>
+    <input id="providerModel" type="text" placeholder="provider/model-name" autocomplete="off">
+  </div>
+  <div class="settings-field">
+    <label for="providerKey">API key (optional for no-auth endpoints)</label>
+    <input id="providerKey" type="password" placeholder="Stored for this tab only" autocomplete="off">
+  </div>
+  <div class="provider-note" id="providerNote"></div>
+  <div class="settings-actions">
+    <button class="secondary" id="providerClear" type="button">Clear provider</button>
+    <button class="secondary" id="settingsClose" type="button">Cancel</button>
+    <button class="primary" id="providerSave" type="button">Save settings</button>
+  </div>
+</dialog>
+
 <main id="chat">
-  <div class="empty-state" id="empty">Checking model status. Search and URL fetch use the internet; code execution runs locally and is not sandboxed.</div>
+  <div class="empty-state" id="empty">Starting II's internet and tool pipeline…</div>
 </main>
 
 <footer>
@@ -156,32 +223,109 @@ const input = document.getElementById('input');
 const send = document.getElementById('send');
 const empty = document.getElementById('empty');
 const backendStatus = document.getElementById('backendStatus');
+const settingsDialog = document.getElementById('settingsDialog');
+const iiApiKey = document.getElementById('iiApiKey');
+const providerUrl = document.getElementById('providerUrl');
+const providerModel = document.getElementById('providerModel');
+const providerKey = document.getElementById('providerKey');
+const providerNote = document.getElementById('providerNote');
+const conversationHistory = [];
+let serverStatus = null;
 
-const API_KEY = {{ api_key|tojson }};
-const apiHeaders = {'Content-Type': 'application/json'};
-if (API_KEY) { apiHeaders['X-II-API-Key'] = API_KEY; }
+function requestHeaders(){
+  const headers = {'Content-Type': 'application/json'};
+  const key = sessionStorage.getItem('ii.api.key') || '';
+  if (key) headers['X-II-API-Key'] = key;
+  return headers;
+}
 
-fetch('/api/status', {headers: apiHeaders}).then(r => r.json()).then(status => {
-  if (status.chat_ready) {
-    backendStatus.textContent = `Model backend: ${status.backend} (renderer only)`;
+function providerConfig(){
+  const api_url = (sessionStorage.getItem('ii.provider.url') || '').trim();
+  const model = (sessionStorage.getItem('ii.provider.model') || '').trim();
+  const api_key = sessionStorage.getItem('ii.provider.key') || '';
+  return api_url && model ? {api_url, model, api_key} : null;
+}
+
+function updateEngineStatus(){
+  const browserProvider = providerConfig();
+  const serverProvider = serverStatus && serverStatus.hybrid_chat_configured;
+  if (browserProvider || serverProvider) {
+    const model = browserProvider ? browserProvider.model : 'server BYOK';
+    backendStatus.textContent = `Hybrid chat + II tools \u2014 ${model}`;
     backendStatus.className = 'ready';
-    empty.textContent = 'II runs the deterministic pipeline: live cited sources, graph traversal and DAG orchestration. The local model is the renderer only. Search and URL fetch use the internet; code execution runs with the current user\u2019s permissions and is not sandboxed.';
+    empty.textContent = 'General conversation is handled by your BYOK model. For factual and complex work it can call II\u2019s search, research, solver, synthesis, static verification, and repository tools.';
   } else {
-    backendStatus.textContent = 'No model connected \u2014 deterministic rendering only';
-    backendStatus.title = status.setup_message || 'Connect a model backend.';
-    backendStatus.className = 'demo';
-    empty.textContent = 'II still answers with the deterministic pipeline and cites its sources; without a model backend the results are rendered as structured text instead of prose. Connect LM Studio or provide a GGUF model for natural-language rendering.';
+    const webState = serverStatus && serverStatus.web_tools_enabled ? 'internet tools enabled' : 'local tools only';
+    backendStatus.textContent = `II tools ready \u2014 ${webState}; add BYOK for general chat`;
+    backendStatus.className = 'error';
+    empty.textContent = 'Configure any OpenAI-compatible model in BYOK settings for general chat and dynamic tool use. Without BYOK, II uses its narrower deterministic pipelines.';
   }
-  const stages = status.pipeline_stages || {};
-  const active = Object.entries(stages).filter(([, s]) => s.active).map(([name]) => name);
-  if (active.length) {
-    backendStatus.title = 'Active pipeline stages: ' + active.join(', ');
+}
+
+iiApiKey.value = sessionStorage.getItem('ii.api.key') || '';
+providerUrl.value = sessionStorage.getItem('ii.provider.url') || '';
+providerModel.value = sessionStorage.getItem('ii.provider.model') || '';
+providerKey.value = sessionStorage.getItem('ii.provider.key') || '';
+document.getElementById('settingsOpen').onclick = () => settingsDialog.showModal();
+document.getElementById('settingsClose').onclick = () => settingsDialog.close();
+document.getElementById('providerSave').onclick = () => {
+  const apiUrl = providerUrl.value.trim();
+  const model = providerModel.value.trim();
+  if ((apiUrl && !model) || (!apiUrl && model)) {
+    providerNote.textContent = 'Provider API URL and model must be entered together.';
+    return;
   }
-}).catch(() => {
-  backendStatus.textContent = 'Backend status unavailable';
-  backendStatus.className = 'demo';
-  empty.textContent = 'Model status could not be checked. Connect a local model backend before expecting AI-generated answers.';
-});
+  if (apiUrl) {
+    try {
+      const parsed = new URL(apiUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+        throw new Error('unsafe URL');
+      }
+    } catch (_) {
+      providerNote.textContent = 'Enter a valid absolute HTTP(S) provider URL.';
+      return;
+    }
+  }
+  sessionStorage.setItem('ii.api.key', iiApiKey.value);
+  if (apiUrl) {
+    sessionStorage.setItem('ii.provider.url', apiUrl);
+    sessionStorage.setItem('ii.provider.model', model);
+    sessionStorage.setItem('ii.provider.key', providerKey.value);
+  } else {
+    ['ii.provider.url', 'ii.provider.model', 'ii.provider.key'].forEach(k => sessionStorage.removeItem(k));
+  }
+  providerNote.textContent = '';
+  conversationHistory.length = 0;
+  settingsDialog.close();
+  refreshStatus();
+};
+document.getElementById('providerClear').onclick = () => {
+  ['ii.provider.url', 'ii.provider.model', 'ii.provider.key'].forEach(k => sessionStorage.removeItem(k));
+  providerUrl.value = ''; providerModel.value = ''; providerKey.value = '';
+  providerNote.textContent = 'BYOK configuration cleared.';
+  conversationHistory.length = 0;
+  updateEngineStatus();
+};
+
+function refreshStatus(){
+  fetch('/api/status', {headers: requestHeaders()}).then(r => {
+    if (!r.ok) throw new Error(`status ${r.status}`);
+    return r.json();
+  }).then(status => {
+    if (!status.engine_ready) throw new Error('engine unavailable');
+    serverStatus = status;
+    updateEngineStatus();
+    const stages = status.pipeline_stages || {};
+    const active = Object.entries(stages).filter(([, s]) => s.active).map(([name]) => name);
+    if (active.length) backendStatus.title = 'Active pipeline stages: ' + active.join(', ');
+  }).catch(() => {
+    serverStatus = null;
+    backendStatus.textContent = 'II engine status unavailable — check server API key';
+    backendStatus.className = 'error';
+    empty.textContent = 'The II server could not report its status. If II_API_KEY is enabled, add it in BYOK settings.';
+  });
+}
+refreshStatus();
 
 function scrollBottom(){ chat.scrollTop = chat.scrollHeight; }
 
@@ -195,6 +339,54 @@ function addMessage(role, text, meta){
   div.appendChild(bubble);
   if(meta){ const m=document.createElement('div'); m.className='meta'; m.textContent=meta; div.appendChild(m); }
   chat.appendChild(div);
+  scrollBottom();
+}
+
+function safeHttpUrl(value){
+  try {
+    const parsed = new URL(value);
+    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : null;
+  } catch (_) { return null; }
+}
+
+function addResultDetails(sources, trace){
+  const safeSources = (Array.isArray(sources) ? sources : []).map(source => ({
+    title: String((source && source.title) || ''),
+    url: safeHttpUrl(source && source.url)
+  })).filter(source => source.url);
+  const tools = Array.isArray(trace) ? trace : [];
+  if (!safeSources.length && !tools.length) return;
+  const details = document.createElement('details');
+  details.className = 'result-details';
+  const summary = document.createElement('summary');
+  const labels = [];
+  if (tools.length) labels.push(`${tools.length} tool call${tools.length === 1 ? '' : 's'}`);
+  if (safeSources.length) labels.push(`${safeSources.length} source${safeSources.length === 1 ? '' : 's'}`);
+  summary.textContent = labels.join(' · ');
+  details.appendChild(summary);
+  const list = document.createElement('ul');
+  tools.forEach(item => {
+    const li = document.createElement('li');
+    const state = item && item.ok ? 'ok' : 'failed';
+    let label = `${String((item && item.tool) || 'unknown tool')} — ${state}`;
+    if (state === 'failed' && item && item.output_preview) {
+      label += `: ${String(item.output_preview).slice(0, 240)}`;
+    }
+    li.textContent = label;
+    list.appendChild(li);
+  });
+  safeSources.forEach(source => {
+    const li = document.createElement('li');
+    const link = document.createElement('a');
+    link.href = source.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = source.title || source.url;
+    li.appendChild(link);
+    list.appendChild(li);
+  });
+  details.appendChild(list);
+  chat.appendChild(details);
   scrollBottom();
 }
 
@@ -218,7 +410,7 @@ function addCodeBlock(code){
 function setTyping(on){
   let t = document.getElementById('typing');
   if(on && !t){
-    t = document.createElement('div'); t.id='typing'; t.className='msg ii'; t.innerHTML='<div class="bubble typing">II is thinking…</div>';
+    t = document.createElement('div'); t.id='typing'; t.className='msg ii'; t.innerHTML='<div class="bubble typing">II is routing tools and sources…</div>';
     chat.appendChild(t);
   } else if(!on && t){ t.remove(); }
   scrollBottom();
@@ -226,25 +418,54 @@ function setTyping(on){
 
 async function sendMessage(){
   const text = input.value.trim();
-  if(!text) return;
+  if(!text || send.disabled) return;
+  const started = performance.now();
   input.value='';
+  send.disabled = true;
   addMessage('user', text);
   setTyping(true);
+  const requestBody = {
+    message: text,
+    history: conversationHistory.slice(-12)
+  };
+  const provider = providerConfig();
+  if (provider) {
+    requestBody.pipeline = 'hybrid';
+    requestBody.provider = provider;
+  }
   try{
     const res = await fetch('/api/chat', {
-      method:'POST', headers: apiHeaders,
-      body: JSON.stringify({message: text})
+      method:'POST', headers: requestHeaders(),
+      body: JSON.stringify(requestBody)
     });
     const data = await res.json();
     setTyping(false);
-    if(data.error){ addMessage('ii','Error: '+data.error); return; }
-    const response = data.response || '';
-    addMessage('ii', response);
-    if (data.status) {
-      addMessage('ii', `\n[status: ${data.status} | intent: ${data.intent || 'n/a'}]`);
+    if(data.error){
+      const detail = data.response ? `${data.response}\n\n${data.error}` : `Error: ${data.error}`;
+      addMessage('ii', detail, data.code || 'request failed');
+      return;
     }
+    const response = data.response || '';
+    const elapsed = ((performance.now() - started) / 1000).toFixed(1);
+    const metaParts = [];
+    if (data.pipeline && data.pipeline.startsWith('hybrid:')) {
+      metaParts.push('BYOK + II tools');
+    } else if (data.intent === 'chat' && data.response_kind) {
+      metaParts.push('deterministic fallback');
+    } else if (data.status) {
+      metaParts.push(data.status);
+    }
+    if (data.intent) metaParts.push(data.intent.replaceAll('_', ' '));
+    const toolCount = (data.tool_trace || []).length;
+    if (toolCount) metaParts.push(`${toolCount} tool call${toolCount === 1 ? '' : 's'}`);
+    metaParts.push(`${elapsed}s`);
+    addMessage('ii', response, metaParts.join(' · '));
+    addResultDetails(data.sources, data.tool_trace);
+    conversationHistory.push({role: 'user', content: text});
+    conversationHistory.push({role: 'assistant', content: response});
+    if (conversationHistory.length > 24) conversationHistory.splice(0, conversationHistory.length - 24);
     (data.questions || []).forEach(q => {
-      addMessage('ii', `\n[question - ${q.slot}] ${q.question}\n(default: ${q.default})`);
+      addMessage('ii', `[question — ${q.slot}] ${q.question}\nDefault: ${q.default}`);
     });
     // render code blocks
     const fenceRe = /```python\s*\n([\s\S]*?)\n```/g;
@@ -255,6 +476,9 @@ async function sendMessage(){
   }catch(e){
     setTyping(false);
     addMessage('ii','Could not reach the II server. Is it running?');
+  } finally {
+    send.disabled = false;
+    input.focus();
   }
 }
 

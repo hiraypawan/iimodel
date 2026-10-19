@@ -32,7 +32,6 @@ from blackboard.ii_blackboard import (
     BlackboardArchitect,
     blackboard_tool,
 )
-from core.llama_local import LocalModel
 from core.ii_security import is_private_mode, run_python_code, web_blocked_message
 
 # --------------------------------------------------------------------------- #
@@ -147,6 +146,8 @@ def get_model():
     if not _LLM_LOADED:
         _LLM_LOADED = True
         try:
+            from core.llama_local import LocalModel
+
             _llm = LocalModel(
                 model_path=os.path.join("models", "qwen2.5-1.5b-instruct-q4_0.gguf"),
                 n_ctx=4096,
@@ -217,7 +218,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search the web (Brave > SearXNG > DuckDuckGo > GitHub). Returns citation-tagged results.",
+            "description": "Search configured web providers concurrently and return citation-tagged results.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
@@ -525,8 +526,8 @@ if __name__ == "__main__":
 # --------------------------------------------------------------------------- #
 # PURE II ROUTER
 #
-# The router decides *which* deterministic pipeline runs.  The language model
-# is only ever used as a renderer at the very end.
+# The router decides *which* deterministic pipeline runs.  Pure II renders the
+# resulting structured data in Python and has no language-model dependency.
 # --------------------------------------------------------------------------- #
 
 #: Intent rules.  Each family lists explicit surface markers; the score is
@@ -557,8 +558,10 @@ _INTENT_MARKERS: dict[str, tuple[str, ...]] = {
         "what happened", "who won",
     ),
     "chat": (
-        "hello", "hi there", "hey", "thanks", "thank you", "who are you",
-        "what can you do", "how are you",
+        "hello", "hi", "hii", "hi there", "hey", "namaste",
+        "good morning", "good afternoon", "good evening", "thanks",
+        "thank you", "who are you", "what are you", "what can you do",
+        "how are you", "help", "bye", "goodbye",
     ),
     # Attribute / leadership / creator / comparison style questions.  These
     # are the shapes the logic-tree solver decomposes best, so they carry
@@ -598,6 +601,84 @@ _FACTUAL_QUESTION_RE = re.compile(
     r"is|are|was|were|does|did|do|can|name\s+the|list|tell\s+me\s+about)\b",
     re.IGNORECASE,
 )
+
+# Short conversational messages must never be sent to the web-search solver.
+# Besides being semantically wrong, doing that made a greeting wait for every
+# network timeout before returning ``INSUFFICIENT_DATA``.  These patterns are
+# deliberately anchored: "hi, who is ...?" still reaches the factual pipeline.
+_DIRECT_CHAT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("greeting", re.compile(
+        r"^(?:(?:h+i+|he+l+o+|hey+|yo+|namaste)(?:\s+(?:ii|there))?|"
+        r"good\s+(?:morning|afternoon|evening))(?:\s*[!.?]*)$",
+        re.IGNORECASE,
+    )),
+    ("thanks", re.compile(
+        r"^(?:thanks|thank\s+you|thx|ty)(?:\s+(?:ii|so\s+much))?[!.?]*$",
+        re.IGNORECASE,
+    )),
+    ("identity", re.compile(
+        r"^(?:who|what)\s+are\s+you[!.?]*$",
+        re.IGNORECASE,
+    )),
+    ("capabilities", re.compile(
+        r"^(?:(?:what|which)\s+can\s+you\s+do|help|help\s+me|"
+        r"show\s+me\s+what\s+you\s+can\s+do)[!.?]*$",
+        re.IGNORECASE,
+    )),
+    ("wellbeing", re.compile(
+        r"^(?:how\s+are\s+you|how(?:'|’)s\s+it\s+going)[!.?]*$",
+        re.IGNORECASE,
+    )),
+    ("farewell", re.compile(
+        r"^(?:bye+|goodbye|see\s+you|later)[!.?]*$",
+        re.IGNORECASE,
+    )),
+)
+
+_DIRECT_CHAT_RESPONSES = {
+    "greeting": (
+        "Hi! I'm II. I use deterministic reasoning, internet sources, and "
+        "local tools rather than a GGUF model. Ask me a factual question, "
+        "request research, solve constraints, or give me code to verify."
+    ),
+    "thanks": "You're welcome. What would you like to work on next?",
+    "identity": (
+        "I'm II — Pure Internet Intelligence. My answers are produced by "
+        "deterministic pipelines that search sources, run tools, and show "
+        "their evidence; no GGUF model is required."
+    ),
+    "capabilities": (
+        "I can research live information with citations, solve multi-step "
+        "factual questions, inspect repositories, check constraints with Z3, "
+        "run bounded program synthesis, and verify code. Try asking a direct "
+        "question or describing the task you want completed."
+    ),
+    "wellbeing": "Ready to work. What should I research, solve, or verify?",
+    "farewell": "Goodbye!",
+}
+
+
+def direct_chat_kind(query: str) -> str | None:
+    """Classify a self-contained conversational message without web access."""
+    text = " ".join((query or "").strip().split())
+    for kind, pattern in _DIRECT_CHAT_PATTERNS:
+        if pattern.fullmatch(text):
+            return kind
+    return None
+
+
+def direct_chat_payload(query: str) -> dict | None:
+    """Return a deterministic response for greetings/help, otherwise ``None``."""
+    kind = direct_chat_kind(query)
+    if kind is None:
+        return None
+    return {
+        "status": "SUPPORTIVE_INFORMATION",
+        "message": _DIRECT_CHAT_RESPONSES[kind],
+        "response_kind": kind,
+        "sources": [],
+    }
+
 
 _exocortex_instance = None
 
@@ -648,6 +729,9 @@ def classify_intent(query: str) -> tuple[str, float]:
     Returns ``(intent, confidence)``.  The confidence is derived from the
     number of matching markers, never from a model.
     """
+    if direct_chat_kind(query) is not None:
+        return "chat", 1.0
+
     text = (query or "").lower()
     scores: dict[str, int] = {}
     for intent, markers in _INTENT_MARKERS.items():
@@ -807,15 +891,19 @@ def _build_node_functions(intent: str, prompt: str, context: dict, llm) -> dict:
 
     else:  # chat
         def finalize(shared: dict) -> dict:
-            return {"raw": {
-                "status": "INSUFFICIENT_DATA",
-                "message": (
-                    "II answers factual questions with live, cited sources. "
-                    "This request was not recognised as a research question, "
-                    "so no answer was produced."
-                ),
-                "sources": [],
-            }}
+            payload = direct_chat_payload(prompt)
+            if payload is None:
+                payload = {
+                    "status": "SUPPORTIVE_INFORMATION",
+                    "message": (
+                        "I can help through internet research and deterministic "
+                        "tools. Please ask a factual question or describe a "
+                        "research, constraint-solving, repository, or coding task."
+                    ),
+                    "response_kind": "guidance",
+                    "sources": [],
+                }
+            return {"raw": payload}
         functions["finalize"] = finalize
 
     def finalize(shared: dict) -> dict:  # noqa: F811 - shared finaliser
@@ -858,7 +946,9 @@ def route_task(user_prompt: str) -> dict:
     from tools.self_tool_builder import matches_tool_task
 
     text = (user_prompt or "").strip()
-    llm = get_model()
+    # Pure II is the reasoning engine.  The default pipeline intentionally has
+    # no GGUF/LM Studio dependency; structured results are rendered by Python.
+    llm = None
 
     if not text:
         payload = _pipeline_payload(
@@ -892,6 +982,23 @@ def route_task(user_prompt: str) -> dict:
             "questions": [],
             "event_log": [],
             "sources": payload.get("sources", []),
+        }
+
+    # Local conversation fast path.  Greetings and capability questions are
+    # understood directly and never incur a network request.
+    conversational = direct_chat_payload(text)
+    if conversational is not None:
+        return {
+            "status": conversational["status"],
+            "answer": conversational["message"],
+            "raw": conversational,
+            "intent": "chat",
+            "confidence": 1.0,
+            "pipeline": "pure_ii:chat_fast",
+            "response_kind": conversational.get("response_kind"),
+            "questions": [],
+            "event_log": [],
+            "sources": [],
         }
 
     # 2. fast path: simple factual question.
@@ -972,5 +1079,6 @@ def route_task(user_prompt: str) -> dict:
         "event_log": outcome.get("event_log", []),
         "errors": outcome.get("errors", {}),
         "used_self_tool": used_self_tool,
+        "response_kind": raw.get("response_kind") if isinstance(raw, dict) else None,
         "sources": raw.get("sources", []) if isinstance(raw, dict) else [],
     }

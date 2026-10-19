@@ -1,16 +1,34 @@
 # II v3.0 — Architecture
 
-II is a local, deterministic reasoning system. The optional 1.5B model is a
-**renderer**; every conclusion comes from Python algorithms over live data.
+II combines a local tool engine with an optional OpenAI-compatible BYOK
+conversation/planning layer. Internet retrieval, Python algorithms, graphs,
+solvers, and tools perform grounded work; no bundled GGUF model or LM Studio
+installation is required.
 
-## Request path (Pure II)
+## Request path (hybrid BYOK)
+
+1. `POST /api/chat` accepts an ephemeral provider URL, model and optional key,
+   or reads the corresponding `II_CHAT_*` environment variables.
+2. `core/hybrid_agent.py` sends conversation history and safe II tool schemas
+   to the provider. The key is never stored or echoed.
+3. The provider may answer ordinary conversation directly or call a bounded
+   allowlist: search, fetch, research, SMT, bounded synthesis, static Python
+   verification, and read-only blackboard inspection. Arbitrary code execution
+   is not exposed.
+4. Tool output is returned to the provider for its final response. Tool use is
+   recorded in `tool_trace`; a tool-assisted answer is conservatively labelled
+   `PARTIAL`, never automatically `VERIFIED`. If every requested tool fails,
+   II discards any attempted provider answer and returns `INSUFFICIENT_DATA`.
+
+## Request path (deterministic fallback)
 
 1. `core/ii_agent.route_task(user_prompt)` receives the request.
 2. **Crisis scan** (`interaction/ii_empathy_module.py`) runs first. A hit
    returns crisis resources and nothing else runs.
-3. **Fast path**: a short, single-step factual question
-   (`core/ii_agent.is_simple_factual`) goes straight to the logic-tree
-   solver — no interviewer, no memory write.
+3. **Fast paths**: greetings, thanks, identity, and capability questions are
+   answered locally with no network call. A short, single-step factual question
+   (`core/ii_agent.is_simple_factual`) goes straight to the logic-tree solver.
+   Neither fast path writes memory or invokes the interviewer.
 4. **Memory context** is read from the Exocortex *only* when the user opted
    in; otherwise the context is empty.
 5. **Interviewer** (`interaction/interviewer.py`) extracts slot constraints.
@@ -23,10 +41,9 @@ II is a local, deterministic reasoning system. The optional 1.5B model is a
 7. **DAG execution** (`core/dag_planner.py`): independent nodes run
    concurrently under asyncio, dependents are gated by the topological order,
    and every node start/end is written to an event log.
-8. **Caged rendering** (`core/caged_renderer.py`): the model formats the
-   resulting JSON under the strict system prompt, and the entity-diff
-   detector rejects (and finally replaces) any rendering that contains
-   entities the JSON does not have.
+8. **Deterministic rendering** (`core/caged_renderer.py`): Python formats the
+   resulting JSON into readable text without introducing claims beyond the
+   structured tool result.
 
 The older model-driven tool-calling loop is still reachable with
 `{"pipeline": "legacy"}` and lives in `core/ii_agent.py` behind the
@@ -36,14 +53,15 @@ The older model-driven tool-calling loop is still reachable with
 
 | Path | Responsibility |
 |---|---|
-| `core/ii_agent.py` | Router, intent rules, legacy agent loop, tool definitions |
+| `core/hybrid_agent.py` | Ephemeral OpenAI-compatible BYOK client and bounded tool loop |
+| `core/ii_agent.py` | Deterministic fallback router and tool definitions |
 | `core/dag_planner.py` | Task graphs, parallel execution, event log |
 | `core/critique_loop` → `core/critic_loop.py` | Sandbox run, Bandit scan, constraint checklist, bounded repair |
-| `core/caged_renderer.py` | Strict renderer prompt + hallucination detector |
+| `core/caged_renderer.py` | Deterministic structured-result renderer; legacy cage retained |
 | `core/nlp.py` | spaCy helpers with a deterministic regex fallback |
 | `core/ii_security.py` | `II_PRIVATE`, SSRF guard, code-execution modes |
 | `core/ii_state.py` | Local decision/checkpoint bookkeeping |
-| `core/llama_local.py` | GGUF / LM Studio / demo model backends |
+| `core/llama_local.py` | Legacy optional renderer adapter (not used by Pure II) |
 | `reasoning/logic_tree_solver.py` | Multi-hop decomposition and cited extraction |
 | `reasoning/tfidf.py` | Dependency-free TF-IDF utilities |
 | `reasoning/constraint_compiler.py` | Restricted explicit-formula parser |
@@ -93,11 +111,12 @@ MobileCLIP vision and entropy-MCTS were moved to `archive/`. They are not
 imported by the runtime; see `archive/README.md` for why each one was
 quarantined.
 
-## What the model may and may not do
+## Engine boundaries
 
-May: format JSON into natural language; generate short code snippets from a
-precise spec (always sandbox-verified before use).
-
-May not: add facts, invent conclusions, brainstorm, opine, or decide what is
-true. The detector catches entity injections; the documented blind spots are
-relation flips, negation/qualifier changes and paraphrase false positives.
+II may retrieve source text and run explicit algorithms and tools. The
+fallback renderer may not fill evidence gaps with invented facts. Hybrid
+responses are provider-generated and therefore are never labelled `VERIFIED`;
+the system prompt requires tool use for current/factual claims, and an
+all-failed tool run is replaced with `INSUFFICIENT_DATA`. Simulations remain
+explicitly unverified. Code execution is not in the hybrid model's allowlist
+and all other execution remains subject to the documented sandbox policy.

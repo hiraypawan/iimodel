@@ -33,9 +33,9 @@ localhost-bound server. `GET /api/status` reports the active mode in
 
 | Method and path | Purpose | Notes |
 |---|---|---|
-| `GET /` | Chat page | Serves the local UI; injects the configured API key so the page can talk to the API. |
-| `GET /api/status` | Backend state and **active pipeline stages** | `pipeline_stages` reports each stage truthfully (`active` + `detail`); a stage is only active when its dependencies and preconditions hold. Also reports `private_mode`, `web_tools_enabled`, `code_sandbox`, `api_auth` and `llm_role`. |
-| `POST /api/chat` | The Pure II pipeline | Body: `{"message": "..."}`. Runs the router (crisis → fast path → memory → interviewer → intent → DAG → caged render). Response: `response`, `status`, `intent`, `confidence`, `pipeline`, `questions`, `constraint_tree`, `sources`, `event_log`, `raw`. Optional `"pipeline": "legacy"` selects the older model-driven tool-calling loop. |
+| `GET /` | Chat page | Serves the local UI without embedding server credentials. When `II_API_KEY` is enabled, enter it in tab-scoped settings. |
+| `GET /api/status` | Engine state and **active pipeline stages** | Reports `backend`, `engine_ready`, `hybrid_chat_configured`, `hybrid_chat_mode`, truthful `pipeline_stages`, `private_mode`, `web_tools_enabled`, `code_sandbox`, and `api_auth`. Never returns provider credentials. |
+| `POST /api/chat` | Hybrid BYOK or deterministic fallback | Body: `{"message":"...", "history":[...], "provider":{"api_url":"https://…/v1", "model":"…", "api_key":"…"}}`. When provider configuration is present, an OpenAI-compatible model handles conversation and dynamically calls safe II tools. Provider data is ephemeral. Without it, the narrow deterministic router runs. Response includes `pipeline`, `response_kind`, `tool_trace`, and `sources`. `pipeline: "legacy"` remains for compatibility. |
 | `POST /api/solve` | Logic-tree solver | Body: `{"query": "..."}`. Returns `{status, steps, final_answer, sources, conflicts, missing, hop_count, execution_order}`. `status` is one of `VERIFIED`, `PARTIAL`, `CONFLICT`, `INSUFFICIENT_DATA`. |
 | `POST /api/interview` | Constraint extraction | Body: `{"prompt": "..."}`. Returns `constraint_tree`, `questions` (≤ 2) and `proceed_with_defaults`. |
 | `GET /api/memory` | What the Exocortex remembers | `description`, `facts`, `episodes`, `tool_runs`. Shows exactly what is stored. |
@@ -62,12 +62,15 @@ localhost-bound server. `GET /api/status` reports the active mode in
 ## Status vocabulary (exact labels)
 
 `VERIFIED`, `PARTIAL`, `SIMULATED`, `UNVALIDATED_COMBINATION`, `CONFLICT`,
-`INSUFFICIENT_DATA`.
+`INSUFFICIENT_DATA`, `SUPPORTIVE_INFORMATION`, `CRISIS_RESOURCES`.
 
-`VERIFIED` requires at least two **independent** source domains for the
-final claim. `PARTIAL` always lists the work that was done and what is
-missing. `SIMULATED` always carries a baseline, non-empty assumptions and the
-disclaimer *"Toy model estimate, not empirical proof."*
+`VERIFIED` is emitted only by deterministic evidence paths and requires at
+least two **independent** source domains for the final claim. Hybrid tool runs
+remain `PARTIAL` because provider-generated prose is not mechanically verified;
+`tool_trace` and `sources` expose the work performed. If all hybrid tool calls
+fail, the provider's attempted answer is discarded and the status is
+`INSUFFICIENT_DATA`. `SIMULATED` always carries a baseline, non-empty
+assumptions and the disclaimer *"Toy model estimate, not empirical proof."*
 
 ## Notes
 
