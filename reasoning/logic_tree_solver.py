@@ -410,19 +410,48 @@ _NAME_STOP_TAIL = {
     "in", "of", "the", "and", "or", "at", "on", "for", "to", "a", "an",
     "as", "is", "was", "were", "are", "by", "with", "from", "that", "which",
     "has", "have", "had", "its", "their", "his", "her",
+    # Pronouns and generic heads are never the extracted name.
+    "he", "she", "they", "it", "we", "you", "this", "these", "those",
+    "there", "who", "whom", "someone", "somebody", "anyone",
 }
 
+# Role words are matched case-insensitively -- real text says "CEO" in
+# uppercase, while the pre-3.1 patterns spelled the roles in lowercase only,
+# so the canonical "Satya Nadella is the CEO of Microsoft." extracted
+# nothing.  The scoped ``(?i:...)`` group keeps the name capture's strict
+# ``[A-Z]`` start intact (a whole-pattern ``re.IGNORECASE`` would also
+# case-fold ``[A-Z]`` and pull in junk such as "of Meta" as a name).
+_ROLE = (
+    r"(?i:ceo|chief executive officer|chief executive|co-founder|cofounder|"
+    r"founder|owner|president)"
+)
+_NAME = r"([A-Z][\w&.'’-]*(?:\s+[A-Z][\w&.'’-]*){0,3})"
+
 _NAME_PATTERNS = [
+    # Role first, then the name: "WhatsApp was created by Brian Acton",
+    # "Meta Platforms is led by Mark Zuckerberg".
     re.compile(
         r"(?:founded|co-founded|created|developed|made|produced|owned|leads|"
-        r"led|heads?|runs?|chief executive|ceo|founder|owner|president)\s+"
+        r"led|heads?|runs?|" + _ROLE + r")\s+"
         r"(?:by\s+|is\s+|was\s+|were\s+)?(?:the\s+)?"
-        r"([A-Z][\w&.'’-]*(?:\s+[A-Z][\w&.'’-]*){0,3})"
+        + _NAME
     ),
+    # Name first, then a linking verb, then the role.  A bounded filler may
+    # sit on either side of the verb, so appositives and role phrases work:
+    # "Satya Nadella is the CEO of Microsoft.",
+    # "Mark Zuckerberg, born May 14, 1984, is the chief executive officer of Meta",
+    # "Mark Zuckerberg is an American businessman and the chief executive officer of Meta".
     re.compile(
-        r"([A-Z][\w&.'’-]*(?:\s+[A-Z][\w&.'’-]*){0,3})\s+"
-        r"(?:is|was|were|are)\s+(?:the\s+|a\s+|an\s+)?(?:current\s+|co-)?"
-        r"(?:ceo|chief executive|founder|co-founder|owner|president)"
+        _NAME + r"[^.!?]{0,70}?\b(?:is|was|were|are)\b[^.!?]{0,70}?"
+        r"(?:the\s+|a\s+|an\s+)?(?:current\s+|co-)?" + _ROLE
+    ),
+    # Role before the name, across the verb: "The CEO of Meta Platforms is
+    # Mark Zuckerberg."
+    re.compile(
+        r"(?:the\s+|a\s+|an\s+)?"
+        + _ROLE
+        + r"\s+(?i:of)\s+[^.!?]{1,60}?\b(?:is|was|were|are)\b\s*"
+        r"(?:the\s+|a\s+|an\s+)?" + _NAME
     ),
 ]
 
@@ -437,40 +466,84 @@ def _clean_name(candidate: str) -> str:
 
 
 def _extract_name(passage: str, entity_text: str) -> Optional[str]:
+    """Extract the person/organisation name a passage attributes (deterministic).
+
+    Every pattern is scanned with :meth:`finditer` so a first match that
+    merely repeats the hop's own entity does not hide a later, usable one.
+    """
     for pattern in _NAME_PATTERNS:
-        match = pattern.search(passage)
-        if not match:
-            continue
-        name = _clean_name(match.group(1))
-        if not name or len(name) < 2:
-            continue
-        if entity_text and name.lower() == entity_text.strip().lower():
-            continue
-        return name
+        for match in pattern.finditer(passage or ""):
+            name = _clean_name(match.group(1))
+            if not name or len(name) < 2:
+                continue
+            if entity_text and name.lower() == entity_text.strip().lower():
+                continue
+            return name
     return None
 
 
+# Attribute-value extraction.  Real text states facts in both directions
+# ("Paris is the capital of France" / "The capital of France is Paris"), so
+# the value may sit on *either* side of the attribute word.  The previous
+# implementation only looked after "is", which returned the wrong side of
+# appositive sentences (e.g. "one of the world's great cultural centres")
+# and truncated decimals ("1.4 billion" -> "1").  Each pattern below
+# therefore names its capture explicitly and only accepts plausible values
+# (proper nouns or numbers with decimals/units); anything else is left
+# unextracted (fail closed) rather than guessed.
+_ATTR = r"(?i:capital|population|price|age)"
+_VALUE_NAME = r"([A-Z][\w&.'’-]*(?:\s+[A-Z][\w&.'’-]*){0,3})"
+_VALUE_NUM = r"((?:[₹$€£]\s*)?\d[\d,]*(?:\.\d+)?(?:\s*[A-Za-z%]+)?)"
+
 _VALUE_PATTERNS = [
+    # Subject first: "Paris is the capital and most populous city of France."
+    # The subject *is* the value being asked for.
     re.compile(
-        r"(?:capital|population|price|age)\b[^.\n]{0,60}?\b(?:is|are|was|were|=|:)\s*"
-        r"([^.!?\n]{1,60})",
-        re.IGNORECASE,
+        _VALUE_NAME + r"\s+(?:is|was|are|were)\s+(?:the\s+|an?\s+)?" + _ATTR
+        + r"(?=\s+(?:of|and)\b|[.,;:!?]|$)"
     ),
+    # Appositive: "Paris, the capital of France, is one of the great cities."
     re.compile(
-        r"\b(?:has|have|had)\s+(?:an?\s+)?(?:capital|population|price|age)\s+of\s+"
-        r"([^.!?\n]{1,60})",
-        re.IGNORECASE,
+        _VALUE_NAME + r"\s*,\s*(?:the\s+|an?\s+)?" + _ATTR + r"\s+(?i:of)\b"
+    ),
+    # Attribute first: "The capital of France is Paris." /
+    # "The population of India is 1.4 billion." (decimals and units kept).
+    re.compile(
+        r"(?:the\s+|an?\s+)?" + _ATTR + r"\s+(?i:of)\s+[^.!?]{1,60}?"
+        r"\b(?:is|was|are|were)\b\s*(?:the\s+|a\s+|an\s+)?(?:"
+        + _VALUE_NUM + "|" + _VALUE_NAME + ")"
+    ),
+    # Possessive form: "France has a population of 67 million."
+    re.compile(
+        r"(?i:has|have|had)\s+(?:an?\s+)?" + _ATTR + r"\s+(?i:of)\s+(?:"
+        + _VALUE_NUM + "|" + _VALUE_NAME + ")"
+    ),
+    # Adjacent form: "France's capital is Paris." / "population is 1.4 billion"
+    re.compile(
+        _ATTR + r"\s+(?:is|are|was|were)\s*(?:the\s+|a\s+|an\s+)?(?:"
+        + _VALUE_NUM + "|" + _VALUE_NAME + ")"
+    ),
+    # Label form: "capital: Paris" / "age = 34"
+    re.compile(
+        _ATTR + r"\s*[:=]\s*(?:" + _VALUE_NUM + "|" + _VALUE_NAME + ")"
     ),
 ]
 
 
 def _extract_value(passage: str) -> Optional[str]:
+    """Extract an attribute value from ``passage`` (deterministic).
+
+    Tries the unambiguous side-of-sentence forms first, so an appositive
+    mention ("Paris, the capital of France, is ...") yields the subject
+    (``Paris``) and never the predicate.  Returns ``None`` when no plausible
+    value (proper noun or number) is found -- never a guessed string.
+    """
     for pattern in _VALUE_PATTERNS:
-        match = pattern.search(passage)
-        if match:
-            value = match.group(1).strip(" ,.;:")
-            if value:
-                return value
+        for match in pattern.finditer(passage or ""):
+            for group in match.groups():
+                value = (group or "").strip(" ,.;:")
+                if value:
+                    return value
     return None
 
 
