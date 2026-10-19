@@ -53,10 +53,10 @@ replaced with a dump of the raw JSON — the answer is never silently kept.
 
 ## Honest capability statement
 
-II beats large AI models at:
+II is designed to be stronger than large AI models at:
 
 * **live, cited facts** — every claim carries its URL,
-* **zero-hallucination Q&A** — hallucination-resistant by design; every claim
+* **hallucination-resistant Q&A** — fail-closed by design; every claim
   is cited and entity-checked,
 * **local repository analysis** — the index, topology and verification run on
   your machine,
