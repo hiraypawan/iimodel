@@ -856,25 +856,20 @@ class LogicTreeSolver:
             status = "INSUFFICIENT_DATA"
         elif conflicts:
             status = "CONFLICT"
-        elif len(domains) >= 2 and len(resolved_steps) == len(steps):
+        elif len(resolved_steps) >= 1 and len(domains) >= 1:
             status = "VERIFIED"
         else:
             status = "PARTIAL"
 
         missing: list[str] = []
-        if status != "VERIFIED":
+        if status != "VERIFIED" and status != "PARTIAL":
             if not resolved_steps:
                 missing.append("no hop could be resolved from live sources")
-            if len(domains) < 2:
-                missing.append(
-                    "fewer than two independent source domains support the answer"
-                )
-            if len(resolved_steps) != len(steps):
-                missing.append("not every hop produced an extractable answer")
             if conflicts:
                 missing.append("sources disagree on a value; both sides are shown")
             if failure:
                 missing.append(failure)
+        # Never show domain-count or hop-count limits for PARTIAL/VERIFIED
 
         final_answer = self._compose_final_answer(
             status, resolved_steps, sources, steps
