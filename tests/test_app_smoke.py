@@ -47,6 +47,11 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn(b"OpenRouter", page.data)
         self.assertIn(b"OpenCode Zen", page.data)
         self.assertIn(b"Load models", page.data)
+        self.assertIn(b"Test model", page.data)
+        self.assertIn(b"/api/v1/models/user?limit=1000", page.data)
+        self.assertIn(b"blocked-models", page.data)
+        self.assertIn(b"BYOK configured (not tested)", page.data)
+        self.assertIn(b"BYOK verified", page.data)
         self.assertIn(b"required for presets", page.data)
         self.assertIn(b"free-labelled model is free-tier, not anonymous", page.data)
         self.assertIn(b"model-access restriction, not an API-key failure", page.data)
@@ -219,6 +224,23 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(response.get_json()["models"], ["free/model-a", "model-b"])
         self.assertNotIn("catalog-secret", response.get_data(as_text=True))
         list_models.assert_called_once_with()
+
+        with patch(
+            "core.hybrid_agent.OpenAICompatibleClient.list_models",
+            return_value=["account/model"],
+        ) as account_models:
+            personalized = self.client.post("/api/providers/models", json={
+                "provider": {
+                    "api_url": "https://openrouter.ai/api/v1",
+                    "models_url": "https://openrouter.ai/api/v1/models/user?limit=1000",
+                    "api_key": "catalog-secret",
+                },
+            })
+        self.assertEqual(personalized.status_code, 200)
+        self.assertEqual(personalized.get_json()["models"], ["account/model"])
+        account_models.assert_called_once_with(
+            "https://openrouter.ai/api/v1/models/user?limit=1000"
+        )
 
         blocked = self.client.post("/api/providers/models", json={
             "provider": {

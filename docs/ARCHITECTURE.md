@@ -11,8 +11,12 @@ installation is required.
    or reads the corresponding `II_CHAT_*` environment variables. UI presets
    (including OpenRouter and OpenCode Zen/Go) only fill known base URLs; custom
    compatible endpoints remain first-class.
-2. `POST /api/providers/models` can query the provider's `GET /models` route.
-   Model IDs, free tiers, pricing, and quotas remain provider-controlled.
+2. `POST /api/providers/models` can query a provider catalog. The browser uses
+   OpenRouter's authenticated `/models/user` catalog first, labels fallback to
+   its public catalog, and hides exact models that returned an access-policy
+   rejection in this tab for one hour. A user-confirmed **Test model** action
+   performs a bounded real inference probe before save. Model IDs, free tiers,
+   pricing, policies, and quotas remain provider-controlled.
 3. Normally, `core/hybrid_agent.py` sends bounded conversation history and safe
    II tool schemas to the provider. On egress-restricted hosted previews, the
    same loop can run in the browser; `/api/hybrid/tools` exposes safe schemas and

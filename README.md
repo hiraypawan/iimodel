@@ -235,11 +235,19 @@ The browser keeps configuration in tab-scoped session storage only.
 
 II does not bundle provider credits or promise that a model is free. Free tiers,
 quotas, tool-calling support, and model availability are controlled by each
-provider and may change. A model appearing in `/models` is not a guarantee that
-the provider permits that model from every API client. For example, OpenRouter
-can mark some models as available only to separately approved agentic harnesses;
-choose another model when the provider returns that policy error. II sends its
-truthful OpenRouter app attribution and does not impersonate an approved app.
+provider and may change. For OpenRouter, **Load models** first requests the
+authenticated account-filtered catalog and explicitly falls back to the public
+catalog only when that credential cannot read the personalized route. Catalog
+membership is still not proof that every API client can invoke a model. Use
+**Test model** to make one confirmed, small inference request before saving; the
+test can consume quota or credits and may make one text-only retry when tool
+fields are unsupported.
+
+OpenRouter can mark some models as available only to separately approved
+agentic harnesses. II sends truthful app attribution and does not impersonate an
+approved app. When an actual request returns a model-access restriction, II
+removes that exact model from the current tab's choices for one hour and asks
+for another model instead of repeatedly retrying or calling it an invalid key.
 Text-only compatible models can handle ordinary chat; factual work requires a
 model with OpenAI-style tool calling.
 

@@ -228,6 +228,7 @@
   <div class="provider-note" id="providerNote"></div>
   <div class="settings-actions">
     <button class="secondary" id="providerClear" type="button">Clear provider</button>
+    <button class="secondary" id="providerTest" type="button">Test model</button>
     <button class="secondary" id="settingsClose" type="button">Cancel</button>
     <button class="primary" id="providerSave" type="button">Save settings</button>
   </div>
@@ -255,6 +256,7 @@ const providerUrl = document.getElementById('providerUrl');
 const providerModel = document.getElementById('providerModel');
 const providerModels = document.getElementById('providerModels');
 const modelsLoad = document.getElementById('modelsLoad');
+const providerTest = document.getElementById('providerTest');
 const providerKey = document.getElementById('providerKey');
 const providerKeyLabel = document.getElementById('providerKeyLabel');
 const providerDirect = document.getElementById('providerDirect');
@@ -303,6 +305,63 @@ function updateProviderKeyHelp(){
     providerKeyLabel.textContent = 'Provider API key (optional only if this custom endpoint explicitly supports anonymous access)';
     providerKey.placeholder = 'Paste the provider key, or leave blank only for a no-auth endpoint';
   }
+}
+
+const MODEL_ACCESS_CACHE_KEY = 'ii.provider.blocked-models';
+const MODEL_ACCESS_TTL_MS = 60 * 60 * 1000;
+
+function providerEndpointKey(apiUrl){
+  try { return completionUrl(apiUrl); } catch (_) { return String(apiUrl || '').trim(); }
+}
+
+function blockedModelEntries(){
+  let entries = [];
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(MODEL_ACCESS_CACHE_KEY) || '[]');
+    if (Array.isArray(parsed)) entries = parsed;
+  } catch (_) { /* Ignore malformed tab-local state. */ }
+  const now = Date.now();
+  entries = entries.filter(entry => entry && typeof entry.endpoint === 'string'
+    && typeof entry.model === 'string' && Number(entry.until) > now).slice(-100);
+  try { sessionStorage.setItem(MODEL_ACCESS_CACHE_KEY, JSON.stringify(entries)); } catch (_) { /* optional cache */ }
+  return entries;
+}
+
+function modelIsBlocked(provider, model){
+  const endpoint = providerEndpointKey(provider && provider.api_url);
+  return blockedModelEntries().some(entry => entry.endpoint === endpoint && entry.model === model);
+}
+
+function blockModelForTab(provider){
+  if (!provider || !provider.api_url || !provider.model) return;
+  const endpoint = providerEndpointKey(provider.api_url);
+  const entries = blockedModelEntries().filter(entry => !(entry.endpoint === endpoint && entry.model === provider.model));
+  entries.push({endpoint, model: provider.model, until: Date.now() + MODEL_ACCESS_TTL_MS});
+  try { sessionStorage.setItem(MODEL_ACCESS_CACHE_KEY, JSON.stringify(entries.slice(-100))); } catch (_) { /* optional cache */ }
+}
+
+function clearBlockedModels(apiUrl){
+  const endpoint = providerEndpointKey(apiUrl);
+  const entries = blockedModelEntries().filter(entry => entry.endpoint !== endpoint);
+  try { sessionStorage.setItem(MODEL_ACCESS_CACHE_KEY, JSON.stringify(entries)); } catch (_) { /* optional cache */ }
+}
+
+const VERIFIED_PROVIDER_KEY = 'ii.provider.verified';
+function verifiedProviderMatches(provider){
+  if (!provider) return false;
+  try {
+    const value = JSON.parse(sessionStorage.getItem(VERIFIED_PROVIDER_KEY) || 'null');
+    return value && value.endpoint === providerEndpointKey(provider.api_url)
+      && value.model === provider.model && Number(value.until) > Date.now();
+  } catch (_) { return false; }
+}
+function markProviderVerified(provider){
+  if (!provider) return;
+  const value = {endpoint: providerEndpointKey(provider.api_url), model: provider.model, until: Date.now() + MODEL_ACCESS_TTL_MS};
+  try { sessionStorage.setItem(VERIFIED_PROVIDER_KEY, JSON.stringify(value)); } catch (_) { /* optional status */ }
+}
+function clearProviderVerification(){
+  try { sessionStorage.removeItem(VERIFIED_PROVIDER_KEY); } catch (_) { /* optional status */ }
 }
 
 async function parseJsonResponse(response, label){
@@ -474,15 +533,20 @@ function directResult(content, trace, sources, nativeTools, pipeline='hybrid:bro
   };
 }
 
-async function directProviderCompletion(provider, messages, tools){
+async function directProviderCompletion(provider, messages, tools, options={}){
   let response;
+  const tokenLimit = Number.isInteger(options.max_tokens)
+    ? Math.max(1, Math.min(64, options.max_tokens))
+    : null;
+  const request = {
+    model: provider.model, messages, tools, tool_choice: 'auto',
+    temperature: 0.2, stream: false
+  };
+  if (tokenLimit !== null) request.max_tokens = tokenLimit;
   try {
     response = await fetch(completionUrl(provider.api_url), {
       method: 'POST', headers: providerHeaders(provider), redirect: 'error',
-      body: JSON.stringify({
-        model: provider.model, messages, tools, tool_choice: 'auto',
-        temperature: 0.2, stream: false
-      })
+      body: JSON.stringify(request)
     });
   } catch (error) {
     throw new Error(`Direct browser connection was blocked by the network or provider CORS: ${error.message}`);
@@ -495,9 +559,11 @@ async function directProviderCompletion(provider, messages, tools){
     fallbackMessages.splice(1, 0, {role: 'system', content: 'Native tool calling is unavailable. Answer ordinary conversation only; do not claim a tool ran.'});
     let fallback;
     try {
+      const fallbackRequest = {model: provider.model, messages: fallbackMessages, temperature: 0.2, stream: false};
+      if (tokenLimit !== null) fallbackRequest.max_tokens = tokenLimit;
       fallback = await fetch(completionUrl(provider.api_url), {
         method: 'POST', headers: providerHeaders(provider), redirect: 'error',
-        body: JSON.stringify({model: provider.model, messages: fallbackMessages, temperature: 0.2, stream: false})
+        body: JSON.stringify(fallbackRequest)
       });
     } catch (networkError) {
       throw new Error(`Direct browser connection was blocked by the network or provider CORS: ${networkError.message}`);
@@ -585,7 +651,10 @@ function updateEngineStatus(){
   }
   if (browserProvider || serverProvider) {
     const model = browserProvider ? browserProvider.model : 'server BYOK';
-    backendStatus.textContent = `BYOK configured + II tools \u2014 ${model}`;
+    const state = browserProvider && verifiedProviderMatches(browserProvider)
+      ? 'BYOK verified + II tools'
+      : 'BYOK configured (not tested) + II tools';
+    backendStatus.textContent = `${state} \u2014 ${model}`;
     backendStatus.className = 'ready';
     empty.textContent = 'General conversation is handled by your BYOK model. For factual and complex work it can call II\u2019s search, research, solver, synthesis, static verification, and repository tools.';
   } else {
@@ -635,6 +704,13 @@ providerUrl.addEventListener('input', () => {
   providerPreset.value = match ? match.id : 'custom';
   updateProviderKeyHelp();
 });
+providerKey.addEventListener('input', () => {
+  // A changed credential may belong to another account with different access.
+  if (providerKey.value !== (sessionStorage.getItem('ii.provider.key') || '')) {
+    clearBlockedModels(providerUrl.value.trim());
+    clearProviderVerification();
+  }
+});
 
 document.getElementById('settingsOpen').onclick = () => settingsDialog.showModal();
 document.getElementById('settingsClose').onclick = () => settingsDialog.close();
@@ -658,6 +734,11 @@ modelsLoad.onclick = async () => {
   providerNote.textContent = 'Requesting this provider\u2019s model catalog…';
   try {
     if (selected && selected.models_url) provider.models_url = selected.models_url;
+    if (selected && selected.id === 'openrouter') {
+      // Prefer OpenRouter's authenticated, account-filtered catalog. It applies
+      // the account's provider preferences, privacy settings, and guardrails.
+      provider.models_url = 'https://openrouter.ai/api/v1/models/user?limit=1000';
+    }
     const loadFromServer = async () => {
       const response = await fetch('/api/providers/models', {
         method: 'POST', headers: requestHeaders(),
@@ -665,10 +746,28 @@ modelsLoad.onclick = async () => {
       });
       return parseJsonResponse(response, 'II model-catalog API');
     };
+    const loadDirectCatalog = async () => {
+      try {
+        const result = await loadModelsDirect(provider, provider.models_url);
+        if (selected && selected.id === 'openrouter') result.catalog_scope = 'account-filtered';
+        return result;
+      } catch (error) {
+        // Some credentials cannot read the personalized catalog, and its CORS
+        // policy can differ from the public route. A 403 here is about catalog
+        // scope, not necessarily inference access; label public fallback.
+        const canUsePublicFallback = selected && selected.id === 'openrouter'
+          && (error.status === 403 || !error.status);
+        if (!canUsePublicFallback) throw error;
+        const result = await loadModelsDirect(provider, 'https://openrouter.ai/api/v1/models');
+        result.catalog_scope = 'public-fallback';
+        result.catalog_notice = 'OpenRouter’s account-filtered catalog was unavailable to this credential/browser, so the public catalog is shown. Test a model before saving.';
+        return result;
+      }
+    };
     let data;
     if (providerDirect.checked) {
       try {
-        data = await loadModelsDirect(provider, provider.models_url);
+        data = await loadDirectCatalog();
       } catch (directError) {
         // An HTTP response proves the browser reached the provider. Preserve its
         // useful auth/model error instead of masking it with a server fallback.
@@ -685,24 +784,122 @@ modelsLoad.onclick = async () => {
       } catch (serverError) {
         if (![424, 502, 503, 504].includes(serverError.status)) throw serverError;
         providerNote.textContent = 'The server could not reach the provider; trying this browser directly…';
-        data = await loadModelsDirect(provider, provider.models_url);
+        data = await loadDirectCatalog();
       }
     }
+    const allModels = Array.isArray(data.models) ? data.models : [];
+    const visibleModels = allModels.filter(model => !modelIsBlocked(provider, model));
+    const blockedCount = allModels.length - visibleModels.length;
     providerModels.replaceChildren();
-    (data.models || []).forEach(model => {
+    visibleModels.forEach(model => {
       const option = document.createElement('option');
       option.value = model;
       providerModels.appendChild(option);
     });
-    if (!providerModel.value && data.models && data.models.length === 1) providerModel.value = data.models[0];
+    if (modelIsBlocked(provider, providerModel.value)) providerModel.value = '';
+    if (!providerModel.value && visibleModels.length === 1) providerModel.value = visibleModels[0];
     const via = data.transport === 'browser-direct' ? ' directly from the browser' : '';
-    providerNote.textContent = `${data.count || 0} models loaded${via}. Type to filter; try “free” where labelled.`;
+    const scope = data.catalog_scope === 'account-filtered' ? ' from the account-filtered catalog' : '';
+    const hidden = blockedCount ? ` ${blockedCount} model rejected earlier in this tab ${blockedCount === 1 ? 'was' : 'were'} hidden.` : '';
+    providerNote.textContent = data.catalog_notice
+      || `${visibleModels.length} models loaded${via}${scope}.${hidden} Type to filter; try “free” where labelled, then use Test model.`;
   } catch (error) {
     const failedProvider = {api_url: apiUrl, api_key: providerKey.value};
     providerNote.textContent = `Could not load models: ${providerFailureMessage(error, failedProvider)}. You can enter a valid model ID manually if this provider does not expose a catalog.`;
   } finally {
     modelsLoad.disabled = false;
     modelsLoad.textContent = 'Load models';
+  }
+};
+providerTest.onclick = async () => {
+  const provider = {
+    api_url: providerUrl.value.trim(),
+    model: providerModel.value.trim(),
+    api_key: providerKey.value
+  };
+  if (!provider.api_url || !provider.model) {
+    providerNote.textContent = 'Choose a provider and model before testing.';
+    (provider.api_url ? providerModel : providerUrl).focus();
+    return;
+  }
+  const credentialError = providerCredentialError(provider);
+  if (credentialError) {
+    providerNote.textContent = credentialError;
+    providerKey.focus();
+    return;
+  }
+  if (modelIsBlocked(provider, provider.model)) {
+    providerNote.textContent = `The provider already rejected “${provider.model}” for this client in this tab. Choose another model, or change the provider credential to test a different account.`;
+    providerModel.focus();
+    providerModel.select();
+    return;
+  }
+  if (!window.confirm('Testing sends one small real inference request and may consume provider quota or credits. A provider that rejects tool fields may receive one text-only retry. Continue?')) return;
+  providerTest.disabled = true;
+  providerTest.textContent = 'Testing…';
+  providerNote.textContent = 'Testing this exact provider, credential, model, and chat-completions route…';
+  try {
+    let nativeTools = null;
+    if (providerDirect.checked) {
+      try {
+        const runtime = await directRuntime();
+        const result = await directProviderCompletion(provider, [
+          {role: 'system', content: 'This is a connection test. Follow the user instruction exactly.'},
+          {role: 'user', content: 'Reply with exactly OK. Do not call a tool.'}
+        ], runtime.tools || [], {max_tokens: 16});
+        const message = result.message;
+        const hasOutput = message && (messageText(message.content).trim()
+          || (Array.isArray(message.tool_calls) && message.tool_calls.length));
+        if (!hasOutput) throw new Error('Provider returned no assistant output during the connection test.');
+        nativeTools = result.nativeTools;
+      } catch (directError) {
+        if (directError.status) throw directError;
+        const data = await serverChat({
+          message: 'Reply with exactly OK. Do not call a tool.',
+          history: [], pipeline: 'hybrid', provider
+        });
+        nativeTools = data.provider_tool_support !== false;
+      }
+    } else {
+      const data = await serverChat({
+        message: 'Reply with exactly OK. Do not call a tool.',
+        history: [], pipeline: 'hybrid', provider
+      });
+      nativeTools = data.provider_tool_support !== false;
+    }
+    markProviderVerified(provider);
+    const saved = providerConfig();
+    if (saved && providerEndpointKey(saved.api_url) === providerEndpointKey(provider.api_url)
+        && saved.model === provider.model) updateEngineStatus();
+    providerNote.textContent = nativeTools
+      ? 'Connection test passed and the provider accepted II’s tool schemas. Click Save settings.'
+      : 'Connection test passed for ordinary chat, but this model rejected native tool calling. It cannot safely handle factual/tool-dependent II requests. Click Save only if text-only chat is acceptable.';
+  } catch (error) {
+    const kind = providerFailureKind(error, provider);
+    const detail = providerFailureMessage(error, provider);
+    clearProviderVerification();
+    if (kind === 'model_access' || kind === 'model_not_found') {
+      const rejectedModel = provider.model;
+      blockModelForTab(provider);
+      Array.from(providerModels.options).forEach(option => {
+        if (option.value === rejectedModel) option.remove();
+      });
+      providerModel.value = '';
+      const saved = providerConfig();
+      if (saved && providerEndpointKey(saved.api_url) === providerEndpointKey(provider.api_url)
+          && saved.model === rejectedModel) {
+        sessionStorage.removeItem('ii.provider.model');
+        updateEngineStatus();
+      }
+      providerNote.textContent = `${detail} “${rejectedModel}” was removed from this tab’s choices for one hour.`;
+      providerModel.focus();
+    } else {
+      providerNote.textContent = `Connection test failed: ${detail}`;
+      if (kind === 'authentication') providerKey.focus();
+    }
+  } finally {
+    providerTest.disabled = false;
+    providerTest.textContent = 'Test model';
   }
 };
 document.getElementById('providerSave').onclick = () => {
@@ -718,6 +915,12 @@ document.getElementById('providerSave').onclick = () => {
   if (credentialError) {
     providerNote.textContent = credentialError;
     providerKey.focus();
+    return;
+  }
+  if (apiUrl && modelIsBlocked({api_url: apiUrl}, model)) {
+    providerNote.textContent = `The provider rejected “${model}” for this client earlier in this tab. Choose another model and use Test model before saving.`;
+    providerModel.focus();
+    providerModel.select();
     return;
   }
   if (apiUrl) {
@@ -746,6 +949,8 @@ document.getElementById('providerSave').onclick = () => {
   refreshStatus();
 };
 document.getElementById('providerClear').onclick = () => {
+  clearBlockedModels(providerUrl.value.trim());
+  clearProviderVerification();
   ['ii.provider.url', 'ii.provider.model', 'ii.provider.key'].forEach(k => sessionStorage.removeItem(k));
   providerPreset.value = 'custom';
   providerUrl.value = ''; providerModel.value = ''; providerKey.value = '';
@@ -919,6 +1124,10 @@ async function sendMessage(){
         data = await directHybridChat(text, provider, requestBody.history);
       }
     }
+    if (provider) {
+      markProviderVerified(provider);
+      updateEngineStatus();
+    }
     setTyping(false);
     const response = data.response || '';
     const elapsed = ((performance.now() - started) / 1000).toFixed(1);
@@ -953,10 +1162,23 @@ async function sendMessage(){
     }
   }catch(e){
     setTyping(false);
-    const detail = redactProviderError(e, provider);
+    let detail = redactProviderError(e, provider);
     const kind = e && e.providerKind ? e.providerKind : providerFailureKind(e, provider);
-    const nextStep = kind === 'model_access' || kind === 'model_not_found'
-      ? 'Choose a different model in BYOK settings'
+    const modelRejected = provider && (kind === 'model_access' || kind === 'model_not_found');
+    if (modelRejected) {
+      const rejectedModel = provider.model;
+      blockModelForTab(provider);
+      clearProviderVerification();
+      Array.from(providerModels.options).forEach(option => {
+        if (option.value === rejectedModel) option.remove();
+      });
+      providerModel.value = '';
+      sessionStorage.removeItem('ii.provider.model');
+      updateEngineStatus();
+      detail += ` “${rejectedModel}” was removed from this tab’s choices for one hour.`;
+    }
+    const nextStep = modelRejected
+      ? 'The rejected model was removed; choose and test another model in BYOK settings'
       : (kind === 'authentication' ? 'Check the provider API key in BYOK settings' : 'Check provider key, model, endpoint, CORS, and server connectivity');
     addMessage('ii', `Request failed: ${detail}`, nextStep);
     if (provider && ['model_access', 'model_not_found', 'authentication'].includes(kind)) {
