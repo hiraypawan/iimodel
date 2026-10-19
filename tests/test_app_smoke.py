@@ -47,7 +47,9 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn(b"OpenRouter", page.data)
         self.assertIn(b"OpenCode Zen", page.data)
         self.assertIn(b"Load models", page.data)
+        self.assertIn(b"provider directly from this browser", page.data)
         self.assertIn("default-src 'self'", page.headers["Content-Security-Policy"])
+        self.assertIn("connect-src 'self' https:", page.headers["Content-Security-Policy"])
         self.assertEqual(page.headers["Referrer-Policy"], "no-referrer")
 
         status = self.client.get("/api/status")
@@ -59,6 +61,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertFalse(body["model_required"])
         self.assertIn("hybrid_chat_configured", body)
         self.assertEqual(body["hybrid_chat_mode"], "openai-compatible-byok")
+        self.assertTrue(body["hybrid_browser_direct"])
         self.assertIsNone(body["setup_message"])
         self.assertEqual(body["version"], "3.0")
         self.assertIn("logic_tree", body["pipeline_stages"])
@@ -143,6 +146,22 @@ class AppSmokeTests(unittest.TestCase):
             history=[{"role": "user", "content": "hello"}],
         )
 
+        from core.hybrid_agent import HybridProviderError
+        with patch(
+            "core.hybrid_agent.HybridAgent.run",
+            side_effect=HybridProviderError("provider unreachable"),
+        ):
+            failed = self.client.post("/api/chat", json={
+                "message": "hello", "pipeline": "hybrid",
+                "provider": {
+                    "api_url": "https://provider.example/v1",
+                    "model": "m", "api_key": "never-echo-this",
+                },
+            })
+        self.assertEqual(failed.status_code, 424)
+        self.assertEqual(failed.content_type, "application/json")
+        self.assertNotIn("never-echo-this", failed.get_data(as_text=True))
+
     def test_explicit_pure_ii_pipeline_bypasses_server_byok(self):
         with patch.dict(os.environ, {
             "II_CHAT_API_URL": "https://provider.example/v1",
@@ -155,6 +174,30 @@ class AppSmokeTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["pipeline"], "pure_ii:chat_fast")
+
+    def test_browser_direct_transport_exposes_only_safe_tools(self):
+        schemas = self.client.get("/api/hybrid/tools")
+        self.assertEqual(schemas.status_code, 200)
+        body = schemas.get_json()
+        names = {tool["function"]["name"] for tool in body["tools"]}
+        self.assertIn("search_web", names)
+        self.assertIn("verify_python", names)
+        self.assertNotIn("execute_code", names)
+        self.assertIn("project tools", body["system_prompt"])
+
+        unsafe = self.client.post("/api/hybrid/tool", json={
+            "name": "execute_code", "arguments": {"code": "print('no')"},
+        })
+        self.assertEqual(unsafe.status_code, 200)
+        self.assertFalse(unsafe.get_json()["ok"])
+
+        static = self.client.post("/api/hybrid/tool", json={
+            "name": "verify_python",
+            "arguments": {"code": "def add(a, b):\n    return a + b"},
+        })
+        self.assertEqual(static.status_code, 200)
+        self.assertTrue(static.get_json()["ok"])
+        self.assertIn('"passed": true', static.get_json()["output"])
 
     def test_provider_model_catalog_is_ephemeral_and_key_safe(self):
         with patch(
@@ -181,6 +224,17 @@ class AppSmokeTests(unittest.TestCase):
         })
         self.assertEqual(blocked.status_code, 400)
         self.assertIn("provider host", blocked.get_json()["error"])
+
+        from core.hybrid_agent import HybridProviderError
+        with patch(
+            "core.hybrid_agent.OpenAICompatibleClient.list_models",
+            side_effect=HybridProviderError("catalog unreachable"),
+        ):
+            unavailable = self.client.post("/api/providers/models", json={
+                "provider": {"api_url": "https://provider.example/v1"},
+            })
+        self.assertEqual(unavailable.status_code, 424)
+        self.assertEqual(unavailable.content_type, "application/json")
 
     def test_incomplete_byok_configuration_is_rejected(self):
         response = self.client.post("/api/chat", json={

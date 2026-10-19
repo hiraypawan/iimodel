@@ -13,8 +13,11 @@ installation is required.
    compatible endpoints remain first-class.
 2. `POST /api/providers/models` can query the provider's `GET /models` route.
    Model IDs, free tiers, pricing, and quotas remain provider-controlled.
-3. `core/hybrid_agent.py` sends bounded conversation history and safe II tool
-   schemas to the provider. The key is never stored or echoed.
+3. Normally, `core/hybrid_agent.py` sends bounded conversation history and safe
+   II tool schemas to the provider. On egress-restricted hosted previews, the
+   same loop can run in the browser; `/api/hybrid/tools` exposes safe schemas and
+   `/api/hybrid/tool` executes only that allowlist. Keys are never persisted or
+   echoed.
 4. The provider may answer ordinary conversation directly or call a bounded
    allowlist: search, fetch, research, SMT, bounded synthesis, static Python
    verification, and read-only blackboard inspection. Arbitrary code execution

@@ -45,6 +45,12 @@ loading the page from disclosing the server credential.
 * **Load models** sends the same ephemeral key to the selected provider's
   `GET /models` endpoint. Presets only supply base URLs; they do not grant free
   access or bypass provider accounts, quotas, terms, or billing.
+* Optional browser-direct transport sends the key, conversation, and returned
+  tool outputs from the current tab directly to the selected HTTPS provider.
+  It is intended for CORS-enabled providers when a hosted II server has blocked
+  egress. Safe tool execution still goes through authenticated II endpoints;
+  arbitrary execution is never exposed. Disable the checkbox to require the
+  normal server-side transport.
 * The provider receives conversation text and tool outputs. Choose a provider
   whose privacy and retention policy you accept.
 * Hybrid chat exposes only a safe tool allowlist. It never offers arbitrary

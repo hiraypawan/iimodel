@@ -63,6 +63,11 @@
   .model-picker { display: flex; gap: 8px; }
   .model-picker input { flex: 1; }
   .model-picker button { white-space: nowrap; padding: 0 12px; }
+  .direct-option {
+    display: flex; align-items: flex-start; gap: 9px; color: var(--muted);
+    font-size: 11px; line-height: 1.4; margin-top: 10px;
+  }
+  .direct-option input { width: auto; margin-top: 2px; accent-color: var(--accent); }
   .settings-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
   .settings-actions button { border-radius: 7px; padding: 8px 13px; cursor: pointer; }
   .secondary { border: 1px solid var(--border); color: var(--text); background: var(--input); }
@@ -184,9 +189,9 @@
   <p>
     Choose OpenRouter, OpenCode Zen, or another preset — or add any custom
     OpenAI-compatible endpoint. The model handles conversation and can choose
-    II's tools. Keys stay in this tab's session storage; the II server forwards
-    the provider key as bearer authentication. Free tiers, quotas, and model
-    availability are controlled by each provider and can change.
+    II's tools. Keys stay in this tab's session storage. Normally II forwards
+    the key as bearer authentication; browser-direct mode sends it straight to
+    the selected provider. Free tiers, quotas, and model availability can change.
   </p>
   <div class="settings-field">
     <label for="iiApiKey">II server API key (only if the server uses II_API_KEY)</label>
@@ -214,6 +219,12 @@
     <label for="providerKey">API key (optional for no-auth endpoints)</label>
     <input id="providerKey" type="password" placeholder="Stored for this tab only" autocomplete="off">
   </div>
+  <label class="direct-option" for="providerDirect">
+    <input id="providerDirect" type="checkbox">
+    <span>Connect to the provider directly from this browser. Use this on hosted
+    previews where the II server cannot reach provider APIs. The provider must
+    allow browser CORS; II tools still run on this server.</span>
+  </label>
   <div class="provider-note" id="providerNote"></div>
   <div class="settings-actions">
     <button class="secondary" id="providerClear" type="button">Clear provider</button>
@@ -245,6 +256,7 @@ const providerModel = document.getElementById('providerModel');
 const providerModels = document.getElementById('providerModels');
 const modelsLoad = document.getElementById('modelsLoad');
 const providerKey = document.getElementById('providerKey');
+const providerDirect = document.getElementById('providerDirect');
 const providerNote = document.getElementById('providerNote');
 const conversationHistory = [];
 const PROVIDER_PRESETS = {{ provider_presets|tojson }};
@@ -262,6 +274,235 @@ function providerConfig(){
   const model = (sessionStorage.getItem('ii.provider.model') || '').trim();
   const api_key = sessionStorage.getItem('ii.provider.key') || '';
   return api_url && model ? {api_url, model, api_key} : null;
+}
+
+async function parseJsonResponse(response, label){
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (_) {
+    const preview = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+    const error = new Error(`${label} returned HTTP ${response.status} with a non-JSON response${preview ? `: ${preview}` : ''}`);
+    error.status = response.status;
+    throw error;
+  }
+  if (!response.ok || data.error) {
+    const raw = data.error && typeof data.error === 'object'
+      ? (data.error.message || JSON.stringify(data.error))
+      : (data.error || `${label} returned HTTP ${response.status}`);
+    const error = new Error(String(raw));
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+}
+
+function providerHeaders(provider){
+  const headers = {'Accept': 'application/json', 'Content-Type': 'application/json'};
+  if (provider.api_key) headers.Authorization = `Bearer ${provider.api_key}`;
+  return headers;
+}
+
+function redactProviderError(error, provider){
+  let message = String(error && error.message ? error.message : error || 'unknown error');
+  if (provider && provider.api_key) message = message.split(provider.api_key).join('[REDACTED]');
+  return message.slice(0, 500);
+}
+
+function completionUrl(apiUrl){
+  const url = new URL(apiUrl);
+  let path = url.pathname.replace(/\/+$/, '');
+  if (!path.endsWith('/chat/completions')) {
+    path = path ? `${path}/chat/completions` : '/v1/chat/completions';
+  }
+  url.pathname = path;
+  url.hash = '';
+  return url.href;
+}
+
+function catalogUrl(apiUrl, override){
+  if (override) return new URL(override).href;
+  const url = new URL(completionUrl(apiUrl));
+  url.pathname = url.pathname.replace(/\/chat\/completions\/?$/, '/models');
+  return url.href;
+}
+
+function modelIds(payload){
+  const entries = Array.isArray(payload)
+    ? payload
+    : (Array.isArray(payload.data) ? payload.data : (Array.isArray(payload.models) ? payload.models : []));
+  const seen = new Set();
+  const ids = [];
+  entries.forEach(entry => {
+    const value = typeof entry === 'string' ? entry : (entry && (entry.id || entry.model || entry.name));
+    if (typeof value === 'string' && value.trim() && !seen.has(value.trim()) && ids.length < 500) {
+      seen.add(value.trim()); ids.push(value.trim());
+    }
+  });
+  return ids;
+}
+
+async function loadModelsDirect(provider, modelsUrl){
+  let response;
+  try {
+    response = await fetch(catalogUrl(provider.api_url, modelsUrl), {
+      method: 'GET', headers: providerHeaders(provider), redirect: 'error'
+    });
+  } catch (error) {
+    throw new Error(`Direct browser connection was blocked by the network or provider CORS: ${error.message}`);
+  }
+  const data = await parseJsonResponse(response, 'Provider model catalog');
+  const models = modelIds(data);
+  if (!models.length) throw new Error('Provider returned no compatible model IDs.');
+  return {models, count: models.length, transport: 'browser-direct'};
+}
+
+function promptNeedsTools(prompt){
+  const text = String(prompt || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (/^(?:(?:who|what) are you|what is your name|how are you)[?.!]*$/.test(text)) return false;
+  if (/https?:\/\//.test(text)) return true;
+  if (/\b(now|current|currently|today|latest|recent|news|weather|price|score|time in|look up|search|research|source|citation|verify)\b/.test(text)) return true;
+  return /^(who|when|where|which|how (?:many|much|long|old|far|tall)|what (?:is|are|was|were)(?! your\b))\b/.test(text);
+}
+
+let directRuntimePromise = null;
+function directRuntime(){
+  if (!directRuntimePromise) {
+    directRuntimePromise = fetch('/api/hybrid/tools', {headers: requestHeaders()})
+      .then(response => parseJsonResponse(response, 'II tool schema'))
+      .catch(error => { directRuntimePromise = null; throw error; });
+  }
+  return directRuntimePromise;
+}
+
+function messageText(content){
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.map(item => item && typeof item.text === 'string' ? item.text : '').join('');
+  return '';
+}
+
+function directResult(content, trace, sources, nativeTools, pipeline='hybrid:browser-direct'){
+  const failed = trace.filter(item => !item.ok);
+  const succeeded = trace.filter(item => item.ok);
+  let response = content;
+  let status = trace.length ? 'PARTIAL' : 'SUPPORTIVE_INFORMATION';
+  if (trace.length && !succeeded.length) {
+    response = `I could not verify or complete this request because II's tool calls failed (${[...new Set(failed.map(item => item.tool))].join(', ')}). I will not substitute an unverified factual answer.`;
+    status = 'INSUFFICIENT_DATA';
+  } else if (failed.length) {
+    response += `\n\nTool limitation: ${[...new Set(failed.map(item => item.tool))].join(', ')} did not complete successfully, so this answer may be incomplete.`;
+  }
+  const uniqueSources = [];
+  const seen = new Set();
+  sources.forEach(source => {
+    if (source && source.url && !seen.has(source.url)) { seen.add(source.url); uniqueSources.push(source); }
+  });
+  return {
+    response, status, intent: 'hybrid_chat', pipeline,
+    response_kind: trace.length ? 'tool_assisted' : 'conversation',
+    tool_trace: trace, sources: uniqueSources,
+    provider_transport: 'browser-direct', provider_tool_support: nativeTools
+  };
+}
+
+async function directProviderCompletion(provider, messages, tools){
+  let response;
+  try {
+    response = await fetch(completionUrl(provider.api_url), {
+      method: 'POST', headers: providerHeaders(provider), redirect: 'error',
+      body: JSON.stringify({
+        model: provider.model, messages, tools, tool_choice: 'auto',
+        temperature: 0.2, stream: false
+      })
+    });
+  } catch (error) {
+    throw new Error(`Direct browser connection was blocked by the network or provider CORS: ${error.message}`);
+  }
+  try {
+    return {message: (await parseJsonResponse(response, 'Provider'))?.choices?.[0]?.message, nativeTools: true};
+  } catch (error) {
+    if (![400, 404, 422].includes(error.status) || !/\b(tool|tools|tool_choice|function|functions)\b/i.test(error.message)) throw error;
+    const fallbackMessages = [...messages];
+    fallbackMessages.splice(1, 0, {role: 'system', content: 'Native tool calling is unavailable. Answer ordinary conversation only; do not claim a tool ran.'});
+    let fallback;
+    try {
+      fallback = await fetch(completionUrl(provider.api_url), {
+        method: 'POST', headers: providerHeaders(provider), redirect: 'error',
+        body: JSON.stringify({model: provider.model, messages: fallbackMessages, temperature: 0.2, stream: false})
+      });
+    } catch (networkError) {
+      throw new Error(`Direct browser connection was blocked by the network or provider CORS: ${networkError.message}`);
+    }
+    return {message: (await parseJsonResponse(fallback, 'Provider'))?.choices?.[0]?.message, nativeTools: false};
+  }
+}
+
+async function directHybridChat(prompt, provider, history){
+  const runtime = await directRuntime();
+  const messages = [{role: 'system', content: runtime.system_prompt}];
+  (Array.isArray(history) ? history.slice(-12) : []).forEach(item => {
+    if (item && ['user', 'assistant'].includes(item.role) && typeof item.content === 'string') {
+      messages.push({role: item.role, content: item.content.slice(0, 6000)});
+    }
+  });
+  messages.push({role: 'user', content: prompt});
+  const trace = [], sources = [];
+  let lastContent = '';
+  for (let step = 1; step <= 4; step += 1) {
+    const result = await directProviderCompletion(provider, messages, runtime.tools || []);
+    const message = result.message;
+    if (!message || typeof message !== 'object') throw new Error('Provider response contained no assistant message.');
+    const content = messageText(message.content).trim();
+    if (content) lastContent = content.slice(0, 50000);
+    let calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    if (!result.nativeTools && promptNeedsTools(prompt)) {
+      return {
+        ...directResult('This provider/model does not support tool calling, so II cannot safely answer this factual or tool-dependent request.', [], [], false, 'hybrid:browser-direct:no-tools'),
+        status: 'INSUFFICIENT_DATA', response_kind: 'provider_without_tools'
+      };
+    }
+    if (!calls.length) {
+      if (!lastContent) throw new Error('Provider returned an empty response.');
+      const final = directResult(lastContent, trace, sources, result.nativeTools);
+      if (!result.nativeTools) {
+        final.pipeline = 'hybrid:browser-direct:no-tools';
+        final.response_kind = 'conversation_without_tools';
+      }
+      return final;
+    }
+    const remaining = 6 - trace.length;
+    if (remaining <= 0) return directResult(lastContent || 'Tool-call safety limit reached.', trace, sources, result.nativeTools, 'hybrid:browser-direct:max-tools');
+    calls = calls.slice(0, Math.min(3, remaining));
+    messages.push({role: 'assistant', content: message.content || '', tool_calls: calls});
+    for (const call of calls) {
+      const fn = call && call.function ? call.function : {};
+      let args = fn.arguments || {};
+      if (typeof args === 'string') {
+        try { args = JSON.parse(args); } catch (_) { args = {}; }
+      }
+      const toolResponse = await fetch('/api/hybrid/tool', {
+        method: 'POST', headers: requestHeaders(),
+        body: JSON.stringify({name: String(fn.name || ''), arguments: args})
+      });
+      const tool = await parseJsonResponse(toolResponse, 'II tool');
+      trace.push({step, tool: tool.tool, arguments: tool.arguments, ok: tool.ok, output_preview: tool.output_preview});
+      (tool.sources || []).forEach(source => sources.push(source));
+      messages.push({
+        role: 'tool', tool_call_id: String(call.id || `call_${step}_${trace.length}`),
+        name: String(tool.tool || fn.name || ''), content: String(tool.output || '').slice(0, 14000)
+      });
+    }
+  }
+  return directResult(lastContent || 'The tool loop reached its safety limit without a final answer.', trace, sources, true, 'hybrid:browser-direct:max-steps');
+}
+
+async function serverChat(requestBody){
+  const response = await fetch('/api/chat', {
+    method: 'POST', headers: requestHeaders(), body: JSON.stringify(requestBody)
+  });
+  return parseJsonResponse(response, 'II chat API');
 }
 
 function updateEngineStatus(){
@@ -291,6 +532,10 @@ iiApiKey.value = sessionStorage.getItem('ii.api.key') || '';
 providerUrl.value = sessionStorage.getItem('ii.provider.url') || '';
 providerModel.value = sessionStorage.getItem('ii.provider.model') || '';
 providerKey.value = sessionStorage.getItem('ii.provider.key') || '';
+const savedDirect = sessionStorage.getItem('ii.provider.direct');
+providerDirect.checked = savedDirect === null
+  ? location.hostname.endsWith('.e2b.app')
+  : savedDirect === 'true';
 const savedPreset = PROVIDER_PRESETS.find(preset => preset.api_url === providerUrl.value);
 providerPreset.value = savedPreset ? savedPreset.id : 'custom';
 
@@ -320,30 +565,37 @@ modelsLoad.onclick = async () => {
   providerNote.textContent = 'Requesting this provider\u2019s model catalog…';
   try {
     const selected = PROVIDER_PRESETS.find(item => item.id === providerPreset.value);
-    const provider = {
-      api_url: apiUrl,
-      api_key: providerKey.value
-    };
+    const provider = {api_url: apiUrl, api_key: providerKey.value};
     if (selected && selected.models_url) provider.models_url = selected.models_url;
-    const response = await fetch('/api/providers/models', {
-      method: 'POST',
-      headers: requestHeaders(),
-      body: JSON.stringify({provider})
-    });
-    const data = await response.json();
-    if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+    const loadFromServer = async () => {
+      const response = await fetch('/api/providers/models', {
+        method: 'POST', headers: requestHeaders(),
+        body: JSON.stringify({provider})
+      });
+      return parseJsonResponse(response, 'II model-catalog API');
+    };
+    let data;
+    if (providerDirect.checked) {
+      try { data = await loadModelsDirect(provider, provider.models_url); }
+      catch (_) { data = await loadFromServer(); }
+    } else {
+      try { data = await loadFromServer(); }
+      catch (_) {
+        providerNote.textContent = 'The server could not reach the provider; trying this browser directly…';
+        data = await loadModelsDirect(provider, provider.models_url);
+      }
+    }
     providerModels.replaceChildren();
     (data.models || []).forEach(model => {
       const option = document.createElement('option');
       option.value = model;
       providerModels.appendChild(option);
     });
-    if (!providerModel.value && data.models && data.models.length === 1) {
-      providerModel.value = data.models[0];
-    }
-    providerNote.textContent = `${data.count || 0} models loaded. Type to filter; try “free” where the provider labels free variants.`;
+    if (!providerModel.value && data.models && data.models.length === 1) providerModel.value = data.models[0];
+    const via = data.transport === 'browser-direct' ? ' directly from the browser' : '';
+    providerNote.textContent = `${data.count || 0} models loaded${via}. Type to filter; try “free” where labelled.`;
   } catch (error) {
-    providerNote.textContent = `Could not load models: ${error.message}. You can enter one manually.`;
+    providerNote.textContent = `Could not load models: ${redactProviderError(error, {api_key: providerKey.value})}. The provider may block browser CORS; you can enter a model ID manually.`;
   } finally {
     modelsLoad.disabled = false;
     modelsLoad.textContent = 'Load models';
@@ -368,6 +620,7 @@ document.getElementById('providerSave').onclick = () => {
     }
   }
   sessionStorage.setItem('ii.api.key', iiApiKey.value);
+  sessionStorage.setItem('ii.provider.direct', String(providerDirect.checked));
   if (apiUrl) {
     sessionStorage.setItem('ii.provider.url', apiUrl);
     sessionStorage.setItem('ii.provider.model', model);
@@ -517,20 +770,30 @@ async function sendMessage(){
     requestBody.provider = provider;
   }
   try{
-    const res = await fetch('/api/chat', {
-      method:'POST', headers: requestHeaders(),
-      body: JSON.stringify(requestBody)
-    });
-    const data = await res.json();
-    setTyping(false);
-    if(data.error){
-      const detail = data.response ? `${data.response}\n\n${data.error}` : `Error: ${data.error}`;
-      addMessage('ii', detail, data.code || 'request failed');
-      return;
+    let data;
+    if (provider && providerDirect.checked) {
+      try {
+        data = await directHybridChat(text, provider, requestBody.history);
+      } catch (directError) {
+        try { data = await serverChat(requestBody); }
+        catch (serverError) {
+          throw new Error(`Direct provider connection failed: ${redactProviderError(directError, provider)}. Server connection also failed: ${redactProviderError(serverError, provider)}`);
+        }
+      }
+    } else {
+      try {
+        data = await serverChat(requestBody);
+      } catch (serverError) {
+        const canTryDirect = provider && [424, 502, 503, 504].includes(serverError.status);
+        if (!canTryDirect) throw serverError;
+        data = await directHybridChat(text, provider, requestBody.history);
+      }
     }
+    setTyping(false);
     const response = data.response || '';
     const elapsed = ((performance.now() - started) / 1000).toFixed(1);
     const metaParts = [];
+    if (data.provider_transport === 'browser-direct') metaParts.push('direct browser connection');
     if (data.provider_tool_support === false) {
       metaParts.push('BYOK text-only · provider tools unsupported');
     } else if (data.pipeline && data.pipeline.startsWith('hybrid:')) {
@@ -560,7 +823,8 @@ async function sendMessage(){
     }
   }catch(e){
     setTyping(false);
-    addMessage('ii','Could not reach the II server. Is it running?');
+    const detail = redactProviderError(e, provider);
+    addMessage('ii', `Request failed: ${detail}`, 'Check provider key, model, endpoint, CORS, and server connectivity');
   } finally {
     send.disabled = false;
     input.focus();

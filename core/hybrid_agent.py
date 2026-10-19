@@ -26,7 +26,10 @@ __all__ = [
     "HybridAgent",
     "HybridProviderError",
     "PROVIDER_PRESETS",
+    "execute_safe_tool",
+    "hybrid_system_prompt",
     "provider_configured",
+    "safe_tool_schemas",
 ]
 
 
@@ -382,7 +385,7 @@ class OpenAICompatibleClient:
             response = self.get_fn(
                 url,
                 headers=self._headers(),
-                timeout=min(self.config.timeout, 30.0),
+                timeout=min(self.config.timeout, 12.0),
                 allow_redirects=False,
             )
         except Exception as exc:
@@ -858,3 +861,42 @@ class HybridAgent:
                 pipeline="hybrid:openai-compatible:max_steps",
             )
         raise HybridProviderError("The BYOK provider returned no usable answer.")
+
+
+def hybrid_system_prompt() -> str:
+    """Return the public hybrid planner prompt for browser-direct transport."""
+    return _SYSTEM_PROMPT
+
+
+def safe_tool_schemas() -> list[dict]:
+    """Return the same restricted tool schemas used by the server-side loop."""
+    return _safe_tools()
+
+
+def execute_safe_tool(name: str, arguments: Any) -> dict:
+    """Execute one bounded hybrid tool call and return a JSON-safe envelope."""
+    raw_call = {
+        "function": {
+            "name": name,
+            "arguments": arguments if isinstance(arguments, dict) else {},
+        }
+    }
+    bounded_name, bounded_arguments = _tool_arguments(raw_call)
+    if bounded_name not in _SAFE_TOOL_NAMES:
+        output = json.dumps({"error": f"Unknown or unsafe tool: {bounded_name}"})
+        ok = False
+    else:
+        try:
+            output = str(HybridAgent._dispatch_tool(bounded_name, bounded_arguments))
+            ok = _tool_output_succeeded(output)
+        except Exception as exc:
+            output = json.dumps({"error": f"{type(exc).__name__}: {exc}"})
+            ok = False
+    return {
+        "tool": bounded_name,
+        "arguments": bounded_arguments,
+        "ok": ok,
+        "output": output[: HybridAgent.MAX_TOOL_OUTPUT_CHARS],
+        "output_preview": output[:500],
+        "sources": _collect_sources(bounded_name, output),
+    }

@@ -235,6 +235,12 @@ quotas, tool-calling support, and model availability are controlled by each
 provider and may change. Text-only compatible models can handle ordinary chat;
 factual work requires a model with OpenAI-style tool calling.
 
+On hosted previews where server egress is restricted, enable **Connect to the
+provider directly from this browser** (it defaults on for Arena's `.e2b.app`
+preview). The browser talks to CORS-enabled providers while safe II tool calls
+still execute through the authenticated II API. If browser CORS is unavailable,
+II falls back to the normal server-side provider transport.
+
 Alternatively, configure the server environment variables below.
 
 ### Environment switches

@@ -109,7 +109,7 @@ def _security_headers(response):
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; base-uri 'none'; form-action 'self'; "
-        "connect-src 'self'; img-src 'self' data:; "
+        "connect-src 'self' https:; img-src 'self' data:; "
         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
     )
     return response
@@ -590,6 +590,7 @@ def api_status():
         "chat_ready": True,
         "hybrid_chat_configured": provider_configured(),
         "hybrid_chat_mode": "openai-compatible-byok",
+        "hybrid_browser_direct": True,
         "legacy_renderer": legacy_renderer,
         "model_required": False,
         "setup_message": None,
@@ -615,6 +616,35 @@ def api_status():
             "OpenAI-compatible BYOK provider enables general chat and planning."
         ),
     })
+
+
+@app.route("/api/hybrid/tools", methods=["GET"])
+def api_hybrid_tools():
+    """Expose only the safe schemas used by browser-direct BYOK transport."""
+    from core.hybrid_agent import hybrid_system_prompt, safe_tool_schemas
+
+    return jsonify({
+        "system_prompt": hybrid_system_prompt(),
+        "tools": safe_tool_schemas(),
+        "limits": {"steps": 4, "tool_calls": 6, "calls_per_step": 3},
+    })
+
+
+@app.route("/api/hybrid/tool", methods=["POST"])
+def api_hybrid_tool():
+    """Execute one safe II tool for the browser-direct hybrid loop."""
+    from core.hybrid_agent import execute_safe_tool
+
+    data = request.get_json(force=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
+    name = data.get("name")
+    arguments = data.get("arguments", {})
+    if not isinstance(name, str) or not name.strip() or len(name) > 100:
+        return jsonify({"error": "tool name must be a non-empty string"}), 400
+    if not isinstance(arguments, dict):
+        return jsonify({"error": "tool arguments must be a JSON object"}), 400
+    return jsonify(execute_safe_tool(name.strip(), arguments))
 
 
 @app.route("/api/providers/models", methods=["POST"])
@@ -666,7 +696,7 @@ def api_provider_models():
         client = OpenAICompatibleClient(config)
         models = client.list_models(models_url) if models_url else client.list_models()
     except HybridProviderError as exc:
-        status = 403 if is_private_mode() else 502
+        status = 403 if is_private_mode() else 424
         return jsonify({
             "error": str(exc),
             "code": "provider_catalog_error",
@@ -707,7 +737,7 @@ def _hybrid_chat(user_message: str, provider_data: dict | None, history):
                 "The BYOK provider could not complete this request. No fallback "
                 "answer was invented."
             ),
-        }), 502
+        }), 424
 
     return jsonify({
         **result,
