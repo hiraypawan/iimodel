@@ -106,6 +106,8 @@ def _security_headers(response):
         "Permissions-Policy",
         "camera=(), microphone=(), geolocation=()",
     )
+    if request.path == "/":
+        response.headers.setdefault("Cache-Control", "no-store")
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; base-uri 'none'; form-action 'self'; "

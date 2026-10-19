@@ -51,6 +51,7 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn("default-src 'self'", page.headers["Content-Security-Policy"])
         self.assertIn("connect-src 'self' https:", page.headers["Content-Security-Policy"])
         self.assertEqual(page.headers["Referrer-Policy"], "no-referrer")
+        self.assertEqual(page.headers["Cache-Control"], "no-store")
 
         status = self.client.get("/api/status")
         self.assertEqual(status.status_code, 200)
