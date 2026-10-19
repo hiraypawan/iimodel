@@ -145,6 +145,20 @@ class HybridAgentTests(unittest.TestCase):
             captured["headers"]["Authorization"], "Bearer secret-not-persisted"
         )
         self.assertFalse(captured["allow_redirects"])
+        self.assertNotIn("HTTP-Referer", captured["headers"])
+
+    def test_openrouter_requests_identify_ii_without_impersonating_an_app(self):
+        config = ProviderConfig(
+            api_url="https://openrouter.ai/api/v1",
+            model="some/model",
+            api_key="secret",
+        )
+        headers = OpenAICompatibleClient(config)._headers()
+        self.assertEqual(
+            headers["HTTP-Referer"], "https://github.com/hiraypawan/iimodel"
+        )
+        self.assertEqual(headers["X-Title"], "II - Pure Internet Intelligence")
+        self.assertEqual(headers["Authorization"], "Bearer secret")
 
     def test_text_only_provider_retries_without_native_tool_fields(self):
         calls = []

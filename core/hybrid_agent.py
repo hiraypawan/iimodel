@@ -285,6 +285,11 @@ class OpenAICompatibleClient:
         }
         if self.config.api_key:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
+        if (urlparse(self.config.api_url).hostname or "").lower() == "openrouter.ai":
+            # OpenRouter documents these attribution headers. Identify II
+            # truthfully rather than impersonating a separately approved app.
+            headers["HTTP-Referer"] = "https://github.com/hiraypawan/iimodel"
+            headers["X-Title"] = "II - Pure Internet Intelligence"
         return headers
 
     def _validated_endpoint(self, url: str) -> str:

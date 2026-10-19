@@ -49,6 +49,8 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn(b"Load models", page.data)
         self.assertIn(b"required for presets", page.data)
         self.assertIn(b"free-labelled model is free-tier, not anonymous", page.data)
+        self.assertIn(b"model-access restriction, not an API-key failure", page.data)
+        self.assertIn(b"HTTP-Referer", page.data)
         self.assertIn(b"provider directly from this browser", page.data)
         self.assertIn("default-src 'self'", page.headers["Content-Security-Policy"])
         self.assertIn("connect-src 'self' https:", page.headers["Content-Security-Policy"])

@@ -55,7 +55,10 @@ loading the page from disclosing the server credential.
   arbitrary execution is never exposed. Disable the checkbox to require the
   normal server-side transport.
 * The provider receives conversation text and tool outputs. Choose a provider
-  whose privacy and retention policy you accept.
+  whose privacy and retention policy you accept. OpenRouter requests include
+  truthful `HTTP-Referer` and `X-Title` attribution for this project; II does
+  not spoof the identity of a separately approved agentic app to bypass model
+  access policies.
 * Hybrid chat exposes only a safe tool allowlist. It never offers arbitrary
   code execution to the hosted model.
 * Protect an exposed II server with `II_API_KEY`; otherwise another user could

@@ -235,8 +235,13 @@ The browser keeps configuration in tab-scoped session storage only.
 
 II does not bundle provider credits or promise that a model is free. Free tiers,
 quotas, tool-calling support, and model availability are controlled by each
-provider and may change. Text-only compatible models can handle ordinary chat;
-factual work requires a model with OpenAI-style tool calling.
+provider and may change. A model appearing in `/models` is not a guarantee that
+the provider permits that model from every API client. For example, OpenRouter
+can mark some models as available only to separately approved agentic harnesses;
+choose another model when the provider returns that policy error. II sends its
+truthful OpenRouter app attribution and does not impersonate an approved app.
+Text-only compatible models can handle ordinary chat; factual work requires a
+model with OpenAI-style tool calling.
 
 On hosted previews where server egress is restricted, enable **Connect to the
 provider directly from this browser** (it defaults on for Arena's `.e2b.app`

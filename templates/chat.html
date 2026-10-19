@@ -331,6 +331,13 @@ async function parseJsonResponse(response, label){
 function providerHeaders(provider){
   const headers = {'Accept': 'application/json', 'Content-Type': 'application/json'};
   if (provider.api_key) headers.Authorization = `Bearer ${provider.api_key}`;
+  const preset = presetForApiUrl(provider.api_url);
+  if (preset && preset.id === 'openrouter') {
+    // OpenRouter's documented attribution headers identify II truthfully; they
+    // do not impersonate one of the provider's separately approved apps.
+    headers['HTTP-Referer'] = 'https://github.com/hiraypawan/iimodel';
+    headers['X-Title'] = 'II - Pure Internet Intelligence';
+  }
   return headers;
 }
 
@@ -340,13 +347,34 @@ function redactProviderError(error, provider){
   return message.slice(0, 500);
 }
 
+function providerFailureKind(error, provider){
+  const detail = redactProviderError(error, provider);
+  const status = Number(error && error.status) || 0;
+  if (/only available (?:on|to|for|via)|not available (?:on|to|for|via) (?:this|your)|requires model-training opt-in|not opted in/i.test(detail)) return 'model_access';
+  if (/insufficient[_ ](?:user[_ ])?quota|insufficient (?:credit|balance)|deposit required|billing|payment required/i.test(detail) || status === 402) return 'credits';
+  if (status === 429 || /rate.?limit|too many requests/i.test(detail)) return 'rate_limit';
+  if (status === 401 || /\b(cookie auth|unauthori[sz]ed|invalid (?:api )?key|authentication failed|missing (?:api )?key)\b/i.test(detail)) return 'authentication';
+  if (status === 403) return 'access_policy';
+  if (status === 404 || /\bmodel (?:was )?not found\b|\bunknown model\b/i.test(detail)) return 'model_not_found';
+  return 'provider_error';
+}
+
 function providerFailureMessage(error, provider){
   const detail = redactProviderError(error, provider);
-  if ([401, 403].includes(error && error.status) || /\b(cookie auth|unauthori[sz]ed|invalid (?:api )?key|authentication)\b/i.test(detail)) {
-    const preset = provider && presetForApiUrl(provider.api_url);
-    const name = preset ? preset.name : 'The provider';
+  const preset = provider && presetForApiUrl(provider.api_url);
+  const name = preset ? preset.name : 'The provider';
+  const kind = providerFailureKind(error, provider);
+  const model = provider && provider.model ? ` “${provider.model}”` : '';
+  if (kind === 'model_access') {
+    return `${name} does not permit model${model} from this client/API route. Choose a different model in BYOK settings. This is a provider model-access restriction, not an API-key failure. Provider detail: ${detail}`;
+  }
+  if (kind === 'authentication') {
     return `${name} rejected the API credentials. Paste a valid provider API key in BYOK settings; a free-labelled model still requires authentication. Provider detail: ${detail}`;
   }
+  if (kind === 'credits') return `${name} reports insufficient credits, quota, or billing access. Provider detail: ${detail}`;
+  if (kind === 'rate_limit') return `${name} rate-limited this request. Retry later or choose another eligible model. Provider detail: ${detail}`;
+  if (kind === 'access_policy') return `${name} refused this request under a provider, account, or model-access policy (HTTP 403). The key is not necessarily invalid. Provider detail: ${detail}`;
+  if (kind === 'model_not_found') return `${name} does not recognize model${model}. Reload the catalog or choose another model. Provider detail: ${detail}`;
   return detail;
 }
 
@@ -860,7 +888,9 @@ async function sendMessage(){
       settingsDialog.showModal();
       providerNote.textContent = credentialError;
       providerKey.focus();
-      throw new Error(credentialError);
+      const missingKeyError = new Error(credentialError);
+      missingKeyError.providerKind = 'authentication';
+      throw missingKeyError;
     }
     let data;
     if (provider && providerDirect.checked) {
@@ -870,7 +900,10 @@ async function sendMessage(){
         // Do not hide an authoritative provider HTTP error (especially 401/403)
         // behind an unrelated hosted-server network failure.
         if (directError.status) {
-          throw new Error(providerFailureMessage(directError, provider));
+          const providerError = new Error(providerFailureMessage(directError, provider));
+          providerError.status = directError.status;
+          providerError.providerKind = providerFailureKind(directError, provider);
+          throw providerError;
         }
         try { data = await serverChat(requestBody); }
         catch (serverError) {
@@ -921,7 +954,17 @@ async function sendMessage(){
   }catch(e){
     setTyping(false);
     const detail = redactProviderError(e, provider);
-    addMessage('ii', `Request failed: ${detail}`, 'Check provider key, model, endpoint, CORS, and server connectivity');
+    const kind = e && e.providerKind ? e.providerKind : providerFailureKind(e, provider);
+    const nextStep = kind === 'model_access' || kind === 'model_not_found'
+      ? 'Choose a different model in BYOK settings'
+      : (kind === 'authentication' ? 'Check the provider API key in BYOK settings' : 'Check provider key, model, endpoint, CORS, and server connectivity');
+    addMessage('ii', `Request failed: ${detail}`, nextStep);
+    if (provider && ['model_access', 'model_not_found', 'authentication'].includes(kind)) {
+      if (!settingsDialog.open) settingsDialog.showModal();
+      providerNote.textContent = detail;
+      if (kind === 'authentication') providerKey.focus();
+      else providerModel.focus();
+    }
   } finally {
     send.disabled = false;
     input.focus();
