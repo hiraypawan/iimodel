@@ -17,7 +17,10 @@ installation is required.
    rejection in this tab for one hour. A user-confirmed **Test model** action
    performs a bounded real inference probe before save. Model IDs, free tiers,
    pricing, policies, and quotas remain provider-controlled.
-3. Normally, `core/hybrid_agent.py` sends bounded conversation history and safe
+3. Anchored greetings, thanks, identity/help prompts, wellbeing checks, and
+   farewells take the deterministic chat fast path before any provider request.
+   This avoids latency and preserves hosted quota even when BYOK is configured.
+   Otherwise `core/hybrid_agent.py` sends bounded conversation history and safe
    II tool schemas to the provider. On egress-restricted hosted previews, the
    same loop can run in the browser; `/api/hybrid/tools` exposes safe schemas and
    `/api/hybrid/tool` executes only that allowlist. Keys are never persisted or

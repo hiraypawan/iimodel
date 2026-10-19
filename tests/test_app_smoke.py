@@ -52,6 +52,8 @@ class AppSmokeTests(unittest.TestCase):
         self.assertIn(b"blocked-models", page.data)
         self.assertIn(b"BYOK configured (not tested)", page.data)
         self.assertIn(b"BYOK verified", page.data)
+        self.assertIn(b"localConversationFastPath", page.data)
+        self.assertIn(b"requestBody.pipeline = 'pure_ii'", page.data)
         self.assertIn(b"required for presets", page.data)
         self.assertIn(b"free-labelled model is free-tier, not anonymous", page.data)
         self.assertIn(b"model-access restriction, not an API-key failure", page.data)
@@ -110,8 +112,25 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(body["response_kind"], "greeting")
         self.assertEqual(body["status"], "SUPPORTIVE_INFORMATION")
         self.assertIn("Hi!", body["response"])
-        self.assertIn("GGUF model", body["response"])
+        self.assertIn("verify results with tools", body["response"])
         solve.assert_not_called()
+
+    def test_default_pipeline_keeps_greetings_local_when_byok_is_configured(self):
+        with patch("core.hybrid_agent.HybridAgent.run") as hosted_run:
+            response = self.client.post("/api/chat", json={
+                "message": "hii",
+                "provider": {
+                    "api_url": "https://openrouter.ai/api/v1",
+                    "model": "free/model",
+                    "api_key": "configured-but-rate-limited",
+                },
+            })
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["pipeline"], "pure_ii:chat_fast")
+        self.assertEqual(body["response_kind"], "greeting")
+        self.assertIn("Hi!", body["response"])
+        hosted_run.assert_not_called()
 
     def test_legacy_chat_reports_demo_instead_of_faking_model_output(self):
         # The legacy tool-calling path still reports demo mode rather than

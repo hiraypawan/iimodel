@@ -437,6 +437,15 @@ function providerFailureMessage(error, provider){
   return detail;
 }
 
+function providerNextStep(kind){
+  if (kind === 'model_access' || kind === 'model_not_found') return 'Choose and test a different model in BYOK settings';
+  if (kind === 'authentication') return 'Check the provider API key in BYOK settings';
+  if (kind === 'rate_limit') return 'Provider quota is exhausted; wait for its reset, add credits, or switch provider/key. Repeated retries will not help.';
+  if (kind === 'credits') return 'Add provider credits or switch to another provider/key; II cannot bypass provider billing limits.';
+  if (kind === 'access_policy') return 'Review the provider account/model policy or choose another eligible model.';
+  return 'Check provider key, model, endpoint, CORS, and server connectivity';
+}
+
 function completionUrl(apiUrl){
   const url = new URL(apiUrl);
   let path = url.pathname.replace(/\/+$/, '');
@@ -483,6 +492,16 @@ async function loadModelsDirect(provider, modelsUrl){
   const models = modelIds(data);
   if (!models.length) throw new Error('Provider returned no compatible model IDs.');
   return {models, count: models.length, transport: 'browser-direct'};
+}
+
+function localConversationFastPath(prompt){
+  const text = String(prompt || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return /^(?:(?:h+i+|he+l+o+|hey+|yo+|namaste)(?:\s+(?:ii|there))?|good\s+(?:morning|afternoon|evening))[!.?]*$/.test(text)
+    || /^(?:thanks|thank\s+you|thx|ty)(?:\s+(?:ii|so\s+much))?[!.?]*$/.test(text)
+    || /^(?:who|what)\s+are\s+you[!.?]*$/.test(text)
+    || /^(?:(?:what|which)\s+can\s+you\s+do|help|help\s+me|show\s+me\s+what\s+you\s+can\s+do)[!.?]*$/.test(text)
+    || /^(?:how\s+are\s+you|how(?:'|’)s\s+it\s+going)[!.?]*$/.test(text)
+    || /^(?:bye+|goodbye|see\s+you|later)[!.?]*$/.test(text);
 }
 
 function promptNeedsTools(prompt){
@@ -1083,12 +1102,18 @@ async function sendMessage(){
     history: conversationHistory.slice(-12)
   };
   const provider = providerConfig();
-  if (provider) {
+  const useLocalFastPath = localConversationFastPath(text);
+  if (useLocalFastPath) {
+    // Greetings, thanks, identity/help, wellbeing, and farewells already have
+    // deterministic local answers. Do not spend hosted quota or fail merely
+    // because a provider is rate-limited.
+    requestBody.pipeline = 'pure_ii';
+  } else if (provider) {
     requestBody.pipeline = 'hybrid';
     requestBody.provider = provider;
   }
   try{
-    const credentialError = providerCredentialError(provider);
+    const credentialError = useLocalFastPath ? '' : providerCredentialError(provider);
     if (credentialError) {
       settingsDialog.showModal();
       providerNote.textContent = credentialError;
@@ -1098,7 +1123,9 @@ async function sendMessage(){
       throw missingKeyError;
     }
     let data;
-    if (provider && providerDirect.checked) {
+    if (useLocalFastPath) {
+      data = await serverChat(requestBody);
+    } else if (provider && providerDirect.checked) {
       try {
         data = await directHybridChat(text, provider, requestBody.history);
       } catch (directError) {
@@ -1124,7 +1151,7 @@ async function sendMessage(){
         data = await directHybridChat(text, provider, requestBody.history);
       }
     }
-    if (provider) {
+    if (provider && !useLocalFastPath) {
       markProviderVerified(provider);
       updateEngineStatus();
     }
@@ -1179,7 +1206,7 @@ async function sendMessage(){
     }
     const nextStep = modelRejected
       ? 'The rejected model was removed; choose and test another model in BYOK settings'
-      : (kind === 'authentication' ? 'Check the provider API key in BYOK settings' : 'Check provider key, model, endpoint, CORS, and server connectivity');
+      : providerNextStep(kind);
     addMessage('ii', `Request failed: ${detail}`, nextStep);
     if (provider && ['model_access', 'model_not_found', 'authentication'].includes(kind)) {
       if (!settingsDialog.open) settingsDialog.showModal();

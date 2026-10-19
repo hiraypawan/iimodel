@@ -248,8 +248,14 @@ agentic harnesses. II sends truthful app attribution and does not impersonate an
 approved app. When an actual request returns a model-access restriction, II
 removes that exact model from the current tab's choices for one hour and asks
 for another model instead of repeatedly retrying or calling it an invalid key.
-Text-only compatible models can handle ordinary chat; factual work requires a
-model with OpenAI-style tool calling.
+
+Anchored greetings, thanks, identity/help prompts, wellbeing checks, and
+farewells use II's instant deterministic chat path even when BYOK is configured.
+They therefore remain available without consuming hosted quota when a provider
+has reached a daily free-tier limit. Broader conversation still requires the
+configured provider; II reports quota or billing failures rather than pretending
+the hosted model answered. Text-only compatible models can handle ordinary
+chat; factual work requires a model with OpenAI-style tool calling.
 
 On hosted previews where server egress is restricted, enable **Connect to the
 provider directly from this browser** (it defaults on for Arena's `.e2b.app`

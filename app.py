@@ -830,6 +830,13 @@ def api_chat():
     if pipeline in {"pure_ii", "pure-ii", "ii"}:
         return _pure_ii_chat(user_message)
     if pipeline == "default":
+        # Narrow conversational fast paths already have deterministic local
+        # answers. They should stay instant and usable even when a configured
+        # hosted provider has exhausted quota or is temporarily unavailable.
+        from core.ii_agent import direct_chat_kind
+
+        if direct_chat_kind(user_message) is not None:
+            return _pure_ii_chat(user_message)
         if byok_available:
             return _hybrid_chat(user_message, provider_data, history)
         return _pure_ii_chat(user_message)

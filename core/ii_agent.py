@@ -637,15 +637,13 @@ _DIRECT_CHAT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 _DIRECT_CHAT_RESPONSES = {
     "greeting": (
-        "Hi! I'm II. I use deterministic reasoning, internet sources, and "
-        "local tools rather than a GGUF model. Ask me a factual question, "
-        "request research, solve constraints, or give me code to verify."
+        "Hi! I'm II. How can I help? I can research current information, "
+        "reason through problems, inspect code, and verify results with tools."
     ),
     "thanks": "You're welcome. What would you like to work on next?",
     "identity": (
-        "I'm II — Pure Internet Intelligence. My answers are produced by "
-        "deterministic pipelines that search sources, run tools, and show "
-        "their evidence; no GGUF model is required."
+        "I'm II — Pure Internet Intelligence. I combine optional BYOK chat "
+        "with search, research, reasoning, verification, and project tools."
     ),
     "capabilities": (
         "I can research live information with citations, solve multi-step "
