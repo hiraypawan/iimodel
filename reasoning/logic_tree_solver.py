@@ -856,7 +856,9 @@ class LogicTreeSolver:
             status = "INSUFFICIENT_DATA"
         elif conflicts:
             status = "CONFLICT"
-        elif len(resolved_steps) >= 1 and len(domains) >= 1:
+        elif len(resolved_steps) == len(steps) and len(domains) >= 1:
+            # One supporting domain is enough for a fully resolved chain, but
+            # never label an intermediate hop VERIFIED when a later hop failed.
             status = "VERIFIED"
         else:
             status = "PARTIAL"
