@@ -499,7 +499,9 @@ def _execute_raw_tool_call(tool_call_dict: dict) -> str:
 def index():
     # Never embed server credentials in HTML. Remote users enter II_API_KEY in
     # tab-scoped settings when API authentication is enabled.
-    return render_template("chat.html")
+    from core.hybrid_agent import PROVIDER_PRESETS
+
+    return render_template("chat.html", provider_presets=PROVIDER_PRESETS)
 
 
 def _pipeline_stages() -> dict:
@@ -613,6 +615,63 @@ def api_status():
             "OpenAI-compatible BYOK provider enables general chat and planning."
         ),
     })
+
+
+@app.route("/api/providers/models", methods=["POST"])
+def api_provider_models():
+    """Discover model IDs without persisting or echoing provider credentials."""
+    from core.hybrid_agent import (
+        HybridProviderError,
+        OpenAICompatibleClient,
+        PROVIDER_PRESETS,
+        ProviderConfig,
+    )
+
+    data = request.get_json(force=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "request body must be a JSON object"}), 400
+    raw_provider = data.get("provider")
+    if not isinstance(raw_provider, dict):
+        return jsonify({"error": "provider must be a JSON object"}), 400
+    supplied = dict(raw_provider)
+    supplied["model"] = supplied.get("model") or "__model_discovery__"
+    try:
+        config = ProviderConfig.from_sources(supplied)
+    except ValueError as exc:
+        return jsonify({"error": str(exc), "code": "invalid_provider_config"}), 400
+    if config is None:
+        return jsonify({"error": "provider API URL is required"}), 400
+    models_url = supplied.get("models_url")
+    if models_url is not None and not isinstance(models_url, str):
+        return jsonify({"error": "provider models_url must be a string"}), 400
+    if isinstance(models_url, str) and len(models_url) > 2048:
+        return jsonify({"error": "provider models_url exceeds the size limit"}), 400
+    if models_url:
+        from urllib.parse import urlparse
+
+        allowed_pairs = {
+            (item["api_url"].rstrip("/"), item["models_url"])
+            for item in PROVIDER_PRESETS
+            if item.get("models_url")
+        }
+        pair = (config.api_url.rstrip("/"), models_url)
+        if (
+            pair not in allowed_pairs
+            and urlparse(config.api_url).hostname != urlparse(models_url).hostname
+        ):
+            return jsonify({
+                "error": "provider models_url must use the provider host",
+            }), 400
+    try:
+        client = OpenAICompatibleClient(config)
+        models = client.list_models(models_url) if models_url else client.list_models()
+    except HybridProviderError as exc:
+        status = 403 if is_private_mode() else 502
+        return jsonify({
+            "error": str(exc),
+            "code": "provider_catalog_error",
+        }), status
+    return jsonify({"models": models, "count": len(models)})
 
 
 # --------------------------------------------------------------------------- #

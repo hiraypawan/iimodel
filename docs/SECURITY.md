@@ -42,6 +42,9 @@ loading the page from disclosing the server credential.
 * User-supplied endpoints must resolve to a public HTTP(S) address. Redirects
   are rejected. Private/loopback endpoints require the operator-only
   `II_CHAT_ALLOW_PRIVATE_ENDPOINT=1` override.
+* **Load models** sends the same ephemeral key to the selected provider's
+  `GET /models` endpoint. Presets only supply base URLs; they do not grant free
+  access or bypass provider accounts, quotas, terms, or billing.
 * The provider receives conversation text and tool outputs. Choose a provider
   whose privacy and retention policy you accept.
 * Hybrid chat exposes only a safe tool allowlist. It never offers arbitrary

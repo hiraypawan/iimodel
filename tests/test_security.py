@@ -61,6 +61,9 @@ class PrivateModeTests(unittest.TestCase):
                 ("/api/search", {"query": "x"}),
                 ("/api/fetch", {"url": "https://example.org/"}),
                 ("/api/research", {"query": "x"}),
+                ("/api/providers/models", {
+                    "provider": {"api_url": "https://example.org/v1"}
+                }),
                 ("/api/repos/ingest", {"url": "https://github.com/a/b"}),
             ):
                 response = client.post(path, json=payload)

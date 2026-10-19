@@ -44,6 +44,9 @@ class AppSmokeTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"Pure Internet Intelligence", page.data)
         self.assertIn(b"OpenAI-compatible BYOK", page.data)
+        self.assertIn(b"OpenRouter", page.data)
+        self.assertIn(b"OpenCode Zen", page.data)
+        self.assertIn(b"Load models", page.data)
         self.assertIn("default-src 'self'", page.headers["Content-Security-Policy"])
         self.assertEqual(page.headers["Referrer-Policy"], "no-referrer")
 
@@ -152,6 +155,32 @@ class AppSmokeTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["pipeline"], "pure_ii:chat_fast")
+
+    def test_provider_model_catalog_is_ephemeral_and_key_safe(self):
+        with patch(
+            "core.hybrid_agent.OpenAICompatibleClient.list_models",
+            return_value=["free/model-a", "model-b"],
+        ) as list_models:
+            response = self.client.post("/api/providers/models", json={
+                "provider": {
+                    "api_url": "https://openrouter.ai/api/v1",
+                    "api_key": "catalog-secret",
+                },
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["models"], ["free/model-a", "model-b"])
+        self.assertNotIn("catalog-secret", response.get_data(as_text=True))
+        list_models.assert_called_once_with()
+
+        blocked = self.client.post("/api/providers/models", json={
+            "provider": {
+                "api_url": "https://provider.example/v1",
+                "models_url": "https://attacker.example/models",
+                "api_key": "must-not-forward",
+            },
+        })
+        self.assertEqual(blocked.status_code, 400)
+        self.assertIn("provider host", blocked.get_json()["error"])
 
     def test_incomplete_byok_configuration_is_rejected(self):
         response = self.client.post("/api/chat", json={

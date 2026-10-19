@@ -6,9 +6,11 @@ project tools remain the authority for research and computed work; no GGUF
 weights or LM Studio installation is required.
 
 For unrestricted conversation and dynamic tool selection, II supports
-**ephemeral BYOK with any OpenAI-compatible model**. The hosted model interprets
-and renders; II's tools search, fetch, solve, synthesize, and inspect. Provider
-credentials are supplied in the UI for the current browser tab or through
+**ephemeral BYOK with OpenAI-compatible chat-completions providers**. The hosted
+model interprets and renders; tool-capable models can call II to search, fetch,
+solve, synthesize, verify, and inspect. Text-only compatible models still work
+for ordinary conversation, while factual/tool-dependent requests fail closed.
+Provider credentials are supplied in the UI for the current browser tab or through
 environment variables, and are never written to the repository or database.
 
 ---
@@ -220,8 +222,19 @@ python app.py --host 0.0.0.0  # prints a loud exposure warning
 ```
 
 II starts directly with its internet-and-tools engine. To enable general chat,
-open **BYOK settings** in the web UI and enter the provider URL, model name,
-and optional API key. The browser keeps these values in session storage only.
+open **BYOK settings** in the web UI. Presets include OpenRouter, OpenCode
+Zen/Go, Groq, Gemini, GitHub Models, Hugging Face, Cerebras, SambaNova, NVIDIA
+NIM, Together, DeepInfra, Fireworks, Mistral, xAI, and OpenAI; custom
+OpenAI-compatible endpoints remain supported. **Load models** asks the selected
+provider's `/models` endpoint so model IDs do not need to be hardcoded. Enter
+the provider key when required. The browser keeps configuration in tab-scoped
+session storage only.
+
+II does not bundle provider credits or promise that a model is free. Free tiers,
+quotas, tool-calling support, and model availability are controlled by each
+provider and may change. Text-only compatible models can handle ordinary chat;
+factual work requires a model with OpenAI-style tool calling.
+
 Alternatively, configure the server environment variables below.
 
 ### Environment switches

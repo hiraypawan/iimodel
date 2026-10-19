@@ -8,14 +8,19 @@ installation is required.
 ## Request path (hybrid BYOK)
 
 1. `POST /api/chat` accepts an ephemeral provider URL, model and optional key,
-   or reads the corresponding `II_CHAT_*` environment variables.
-2. `core/hybrid_agent.py` sends conversation history and safe II tool schemas
-   to the provider. The key is never stored or echoed.
-3. The provider may answer ordinary conversation directly or call a bounded
+   or reads the corresponding `II_CHAT_*` environment variables. UI presets
+   (including OpenRouter and OpenCode Zen/Go) only fill known base URLs; custom
+   compatible endpoints remain first-class.
+2. `POST /api/providers/models` can query the provider's `GET /models` route.
+   Model IDs, free tiers, pricing, and quotas remain provider-controlled.
+3. `core/hybrid_agent.py` sends bounded conversation history and safe II tool
+   schemas to the provider. The key is never stored or echoed.
+4. The provider may answer ordinary conversation directly or call a bounded
    allowlist: search, fetch, research, SMT, bounded synthesis, static Python
    verification, and read-only blackboard inspection. Arbitrary code execution
-   is not exposed.
-4. Tool output is returned to the provider for its final response. Tool use is
+   is not exposed. If an otherwise compatible endpoint rejects native tool
+   fields, II retries text-only for ordinary chat and refuses factual/tool work.
+5. Tool output is returned to the provider for its final response. Tool use is
    recorded in `tool_trace`; a tool-assisted answer is conservatively labelled
    `PARTIAL`, never automatically `VERIFIED`. If every requested tool fails,
    II discards any attempted provider answer and returns `INSUFFICIENT_DATA`.
