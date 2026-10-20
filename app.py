@@ -746,12 +746,12 @@ def _hybrid_chat(user_message: str, provider_data: dict | None, history):
                 import json as _json
                 result_json_str = obs[start + len("RAW_JSON_START"):end].strip()
                 data = _json.loads(result_json_str)
-                    for r in data.get("results", [])[:3]:
-                        cid = r.get("citation_id", "[?]")
-                        title = r.get("title", "")
-                        url = r.get("link", "")
-                        snippet = r.get("snippet", "")[:120]
-                        final_text += f"{cid} {title}\nURL: {url}\nSummary: {snippet}\n\n"
+                for r in data.get("results", [])[:3]:
+                    cid = r.get("citation_id", "[?]")
+                    title = r.get("title", "")
+                    url = r.get("link", "")
+                    snippet = r.get("snippet", "")[:120]
+                    final_text += f"{cid} {title}\nURL: {url}\nSummary: {snippet}\n\n"
                 # Time/current info: extract directly from snippets (no site visit needed)
                 time_keywords = ["time", "date", "now", "indian", "ist", "current"]
                 if any(k in user_message.lower() for k in time_keywords):
@@ -774,12 +774,12 @@ def _hybrid_chat(user_message: str, provider_data: dict | None, history):
                     if time_found:
                         final_text += f"Current time (live from search): {time_found} (Indian Standard Time / IST). Source: search engine snippet. [Agentic harness — pure internet]\n"
                 return jsonify({
-                "response": final_text,
+                    "response": final_text,
                 "pipeline": "agentic",
                 "agentic_harness": True,
                 "search_raw": obs[:3000],
                 "status": "AGENTIC_HARNESS",
-                "note": "BYOK provider failed; using pure internet agentic synthesis. " + msg[:200],
+                "note": "Rate limit or provider restriction detected. Using pure agentic synthesis (internet search). " + msg[:200],
             })
         except Exception as exc2:
             return jsonify({
@@ -790,6 +790,18 @@ def _hybrid_chat(user_message: str, provider_data: dict | None, history):
                     "answer was invented."
                 ),
             }), 424
+
+    # Identity enforcement: replace any model identity claim with II / Pawan Hiray
+    response_text = result.get("response", "")
+    if isinstance(response_text, str):
+        response_text = response_text.replace("MiniMax", "II").replace("MiniMax-M3.1-Flash", "II v2.0")
+        response_text = response_text.replace("conversational assistant running on", "developed by Pawan Hiray; local agent prototype")
+        response_text = response_text.replace("I'm II — a conversational assistant", "I'm II (Identity: II v2.0), developed by Pawan Hiray.")
+        # Force identity if user asks who made it
+        user_lower = user_message.lower()
+        if any(p in user_lower for p in ["who made you", "who are you", "your name", "who created"]):
+            response_text = "I am II, developed by Pawan Hiray. I am the II local agent prototype connected to optional local or BYOK language models."
+        result["response"] = response_text
 
     return jsonify({
         **result,
@@ -1223,8 +1235,8 @@ def api_chat():
                     if time_found:
                         final_text = f"Current time from live search results: {time_found}. Source: search engine snippet. [Agentic harness — no LM Studio needed]"
                     else:
-                        # Fallback: synthesize normally
-                        final_text += f"\nNote: Time query detected. Search results did not include a direct time snippet. Try a specific query like 'current time in India IST now'."
+                        # Fallback for time queries without direct snippet
+                        final_text += f"\nNote: Time query detected. Search results available but no direct time snippet found in top results. Try 'current time in India IST now'."
                 else:
                     # Build AI-style explanation (like DuckDuckGo AI / Chrome AI mode) using top result
                     top = sources[0].strip()
@@ -1258,8 +1270,6 @@ def api_chat():
                             if line.startswith("[") and "]" in line:
                                 final_text += f"- {line[:150]}\n"
                     final_text += "Every claim is backed by the cited search source."
-                else:
-                    final_text += "No structured citations found in search response. Raw search performed: " + user_message
             except Exception as exc:
                 final_text = f"Agentic search attempted but encountered error: {exc}. Query: {user_message}"
         citation_verification = {"verified": True, "missing_citations": [], "unused_sources": []}
