@@ -49,6 +49,12 @@ PROVIDER_PRESETS: tuple[dict[str, str], ...] = (
         "note": "Requires an OpenCode Zen API key; signing in to the website alone is not enough, including for free-labelled models.",
     },
     {
+        "id": "google-gemini",
+        "name": "Google Gemini",
+        "api_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "note": "Requires a Gemini API key from Google AI Studio; compatible with OpenAI chat-completions endpoint.",
+    },
+    {
         "id": "opencode-go",
         "name": "OpenCode Go",
         "api_url": "https://opencode.ai/zen/go/v1",

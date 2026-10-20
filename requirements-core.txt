@@ -21,6 +21,7 @@ tree-sitter-typescript>=0.23.0,<0.24.0
 # --- Web search / fetch (agentic mode) ---
 ddgs>=9.0.0,<10.0.0
 trafilatura>=1.6.0
+beautifulsoup4>=4.12.0
 
 # --- Deterministic NLP (entity extraction, dependency parse) ---
 # The pipeline works without the small English model: core/nlp.py falls back
