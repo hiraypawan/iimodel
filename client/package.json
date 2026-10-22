@@ -1,13 +1,13 @@
 {
   "name": "ii-host-client",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Desktop host client for the II decentralized network MVP",
+  "description": "Signed desktop worker for the II background AI network",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js",
-    "test": "node --test client.test.js"
+    "check": "node --check main.js && node --check preload.js && node --check renderer.js && node --check worker-agent.js",
+    "test": "node --test *.test.js"
   },
   "devDependencies": {
     "electron": "28.3.3"

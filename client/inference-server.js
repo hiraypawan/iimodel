@@ -116,7 +116,8 @@ class LocalInferenceServer {
       this.loadError = 'No compatible GGUF model is configured.';
       return false;
     }
-    // TODO-REAL: Add a DeepSeek expert adapter/export path for raw safetensors.
+    // TODO-REAL: Add a runtime-supported distributed expert graph for an exact
+    // signed model topology; an isolated safetensors file is not a language model.
     if (path.extname(modelPath).toLowerCase() !== '.gguf') {
       this.loadError = 'node-llama-cpp requires a GGUF model; raw safetensors cannot be executed.';
       return false;

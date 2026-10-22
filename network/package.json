@@ -1,14 +1,16 @@
 {
   "name": "ii-network-coordinator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Coordinator for the II decentralized network MVP",
+  "description": "Trusted coordinator for the II background AI worker network",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js",
+    "check": "node --check server.js && node --check jobs.js && node --check learning.js && node --check model-registry.js && node --check security.js",
     "test": "node --test *.test.js",
-    "configure:dodo": "node configure-dodo.js"
+    "configure:dodo": "node configure-dodo.js",
+    "keygen:release": "node generate-release-key.js",
+    "sign:manifest": "node sign-manifest.js"
   },
   "engines": {
     "node": ">=20"

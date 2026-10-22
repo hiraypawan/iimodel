@@ -20,7 +20,7 @@ async function createSafetensorsFixture(filePath) {
       shape: [TEN_MIB],
       data_offsets: [0, TEN_MIB],
     },
-    __metadata__: { purpose: 'II v0.2 download test; not inference weights' },
+    __metadata__: { purpose: 'II v0.3 download test; not inference weights' },
   };
   let headerJson = JSON.stringify(header);
   headerJson += ' '.repeat((8 - (Buffer.byteLength(headerJson) % 8)) % 8);
@@ -57,19 +57,39 @@ test('downloads a real 10 MiB expert artifact and keeps inference fail-closed', 
   await createSafetensorsFixture(fixturePath);
   const expectedSha256 = await sha256File(fixturePath);
 
-  const artifactServer = http.createServer((_req, res) => {
+  let receivedRange = null;
+  const artifactServer = http.createServer((req, res) => {
     const stats = fs.statSync(fixturePath);
-    res.writeHead(200, {
+    receivedRange = req.headers.range || receivedRange;
+    const match = /^bytes=(\d+)-$/.exec(req.headers.range || '');
+    const start = match ? Number(match[1]) : 0;
+    res.writeHead(match ? 206 : 200, {
       'Content-Type': 'application/octet-stream',
-      'Content-Length': stats.size,
+      'Content-Length': stats.size - start,
+      ...(match ? { 'Content-Range': `bytes ${start}-${stats.size - 1}/${stats.size}` } : {}),
     });
-    fs.createReadStream(fixturePath).pipe(res);
+    fs.createReadStream(fixturePath, { start }).pipe(res);
   });
   const artifactAddress = await listen(artifactServer);
 
   const inference = new LocalInferenceServer({ host: '127.0.0.1', port: 0, expertId: 0 });
   await inference.start();
   const inferenceAddress = inference.server.address();
+
+  const partialPath = path.join(
+    temporaryDirectory,
+    '.ii',
+    'experts',
+    'sha256',
+    expectedSha256.slice(0, 2),
+    `${expectedSha256}.safetensors.part`,
+  );
+  await fsp.mkdir(path.dirname(partialPath), { recursive: true });
+  const fixture = await fsp.open(fixturePath, 'r');
+  const resumeChunk = Buffer.alloc(1024 * 1024);
+  await fixture.read(resumeChunk, 0, resumeChunk.length, 0);
+  await fixture.close();
+  await fsp.writeFile(partialPath, resumeChunk);
 
   t.after(async () => {
     await inference.close();
@@ -88,6 +108,8 @@ test('downloads a real 10 MiB expert artifact and keeps inference fail-closed', 
   assert.equal(artifact.tensorCount, 1);
   assert.equal(artifact.sha256, expectedSha256);
   assert.equal(artifact.downloaded, true);
+  assert.equal(receivedRange, 'bytes=1048576-');
+  assert.match(artifact.path, new RegExp(`sha256[/\\\\]${expectedSha256.slice(0, 2)}[/\\\\]${expectedSha256}`));
   assert.ok(artifact.sizeBytes >= TEN_MIB);
   const diskStats = await fsp.stat(artifact.path);
   if (Number.isFinite(diskStats.blocks)) {

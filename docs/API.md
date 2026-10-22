@@ -1,6 +1,9 @@
-# II v3.0 — API reference
+# Historical local-engine API reference
 
-The server binds to `127.0.0.1:5000` by default.
+> For the decentralized coordinator, signed host protocol, durable jobs, and
+> teaching intake, see [`NETWORK-API.md`](./NETWORK-API.md).
+
+The local Python server binds to `127.0.0.1:5000` by default.
 
 ## Authentication
 

@@ -1,7 +1,12 @@
-# II v3.0 — Implementation plan (v4 order)
+# Historical local-engine implementation plan
 
-This is the plan the code actually follows. Each phase lists what was built,
-what was deliberately **not** built, and where the code lives.
+> This document records the earlier Python/BYOK research engine under `core/`,
+> `reasoning/`, and related packages. It is retained for traceability. The active
+> decentralized worker/Jarvis product roadmap is [`ROADMAP.md`](./ROADMAP.md),
+> and the current network truth is in [`README.md`](./README.md).
+
+Each historical phase below lists what was built, what was deliberately **not**
+built, and where that local-engine code lives.
 
 The governing rules live in the README: the LLM is the renderer, the status
 taxonomy is fixed, and no claim may outrun its evidence.

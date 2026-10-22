@@ -1,187 +1,292 @@
-# II — Decentralized Internet Intelligence
+# II — Internet Intelligence
 
-> A community-hosted AI network where phones route requests and ordinary computers hold model experts—without a central GPU fleet.
+> A privacy-conscious worker network for background AI jobs, with a local-first Jarvis product as the destination.
 
-[![MVP](https://img.shields.io/badge/MVP-done-c9ff52?labelColor=111315)](./network/server.js)
-[![Coordinator](https://img.shields.io/badge/coordinator-Express%204.19-65e7dc?labelColor=111315)](./network)
-[![Desktop](https://img.shields.io/badge/desktop-Electron%2028-9feaf9?labelColor=111315)](./client)
-[![Inference](https://img.shields.io/badge/inference-v0.2%20in%20progress-ff9d5c?labelColor=111315)](#current-status)
+[![Coordinator](https://img.shields.io/badge/coordinator-v0.3-c8ff4d?labelColor=111315)](./network)
+[![Worker](https://img.shields.io/badge/desktop-signed%20worker-68e8dd?labelColor=111315)](./client)
+[![Inference](https://img.shields.io/badge/inference-fail--closed-ffcf66?labelColor=111315)](./client/inference-server.js)
 
-II is being built as a network, not one centrally hosted model. Tier 1 subscriptions fund the product, while a broad host community—starting with India—supplies distributed capacity.
+## Executive truth
 
-> **Honesty boundary:** registration, heartbeats, expert-aware routing, checkout-session creation, and the Genesis application flow are implemented. A complete 340 GB model is **not** running across the network yet. Remaining boundaries are explicitly marked `TODO-REAL` in code and below.
+II v0.3 implements a **cryptographically identified desktop-worker control plane**. It registers signed hosts, accepts only artifacts matching publisher-signed manifests, stores those artifacts as real content-addressed bytes, leases encrypted background jobs to compatible GGUF workers, retries failures, and never fabricates inference.
 
-## Architecture
+It is **not yet** a complete phone Jarvis or a distributed 340 GB model. There is no Android/MLC voice app, DHT, WAN tensor pipeline, raw-safetensors expert runtime, automatic LoRA training, or production model bundled in this repository. Those require a reviewed redistributable checkpoint, physical devices, and runtime work documented below.
+
+## What changed in v0.3
+
+- Ed25519 host identities; `device_id` is derived from the public key.
+- Signed registration, heartbeat, lease, completion, and failure requests with replay protection.
+- Publisher-signed `ii.model-manifest.v1` releases and a trusted release-key boundary.
+- Separate desired `device_assignments` from verified `host_artifacts`.
+- Coverage counts only live, signed, manifest-matching claims; routable coverage also requires a ready runtime and endpoint.
+- Content-addressed SHA-256 artifact paths with resumable HTTP range downloads.
+- Durable encrypted jobs, receipt tokens, leases, retries, cancellation, and worker results.
+- NAT-friendly pull workers: no inbound public port is required for background jobs.
+- Explicit opt-in teaching intake with encryption, direct-identifier/secret rejection, quarantine, status receipts, and deletion.
+- Hardened Electron renderer using a sandboxed preload bridge instead of renderer Node access.
+
+## Product architecture
 
 ```text
-┌───────────────────────────────┐
-│ Phone Router                  │
-│ Qwen3 4B Q4_K_M via MLC       │
-│ (routing only; never a host)  │
-└──────────────┬────────────────┘
-               │ prompt + required expert IDs
-               ▼
-┌───────────────────────────────┐
-│ Coordinator                   │
-│ Node.js 20 + Express + SQLite │
-│ registration / health / route │
-└──────────────┬────────────────┘
-               │ HTTPS routes (P2P begins in v0.3)
-        ┌──────┴──────────────────────────────────────┐
-        ▼             ▼             ▼                 ▼
-   ┌────────┐    ┌────────┐    ┌────────┐       ┌────────┐
-   │ PC 01  │    │ PC 02  │    │ PC 03  │  ...  │ PC 20  │
-   │13 exp. │    │13 exp. │    │13 exp. │       │13 exp. │
-   └────────┘    └────────┘    └────────┘       └────────┘
-                  one redundant full-copy group
+Future phone reflex plane (not shipped)
+┌──────────────────────────────────────────────────────────────┐
+│ Wake word · local STT · small local model · local TTS       │
+│ Instant/private commands stay on the phone                   │
+└─────────────────────────────┬────────────────────────────────┘
+                              │ hard/background job
+                              ▼
+Current control plane
+┌──────────────────────────────────────────────────────────────┐
+│ Node.js 20 · Express 4.19 · SQLite                           │
+│ signed identity · signed releases · encrypted jobs · routing │
+└─────────────────────────────┬────────────────────────────────┘
+                              │ outbound lease polling
+                              ▼
+Current worker plane
+┌──────────────────────────────────────────────────────────────┐
+│ Electron 28 · node-llama-cpp · complete compatible GGUF      │
+│ verified artifact · real inference or honest HTTP 503        │
+└──────────────────────────────────────────────────────────────┘
+
+Research plane (not shipped): runtime-supported LAN pipeline / remote MoE
+Distribution future: authenticated peer chunk transfer; HTTP works today
 ```
 
-The target base is a DeepSeek-V4-style mixture-of-experts architecture: 671B total parameters, 37B active per token, 256 experts, and approximately 340 GB of quantized weights. Those are design targets, not current measured production capabilities.
+The recommended product split is deliberate:
 
-## Sharding math
+- **Voice/reflex:** local phone execution; never depend on a multi-hop WAN pipeline.
+- **Deep work:** stable desktop workers for research, coding, and document jobs.
+- **Weight distribution:** signed, content-addressed artifacts; peer transfer later.
+- **Distributed tensors:** a measured research track, not a marketing claim.
 
-| Item | Calculation | Target |
-|---|---:|---:|
-| Total model | Provided model-weight target | ~340 GB |
-| Expert size | 340 GB ÷ 256 | ~1.3 GB |
-| Experts per desktop | Fixed assignment | 13 experts |
-| Weight data per desktop | 13 × ~1.3 GB | ~17 GB |
-| Runtime overhead | Cache, metadata, process headroom | ~3 GB |
-| Desktop allocation target | ~17 GB + ~3 GB | 20 GB |
-| Desktops per full copy | ceil(256 ÷ 13) | **20 devices** |
-| Capacity with 400 hosts | 400 ÷ 20 | **20 full-copy groups** |
+“One II” means one signed release/protocol bundle. Separate local and worker checkpoints are not Frankenstein inference because their layers are never stitched into one forward pass.
 
-Thirteen experts across 20 devices provide 260 expert slots. The four additional slots are redundancy; a complete assignment still covers expert IDs 0–255.
+## Corrected sharding status
 
-## Tech stack
+The original 256-expert, 13-assignment, 20-device math remains a **placement target**:
 
-- **Coordinator:** Node.js 20, Express 4.19, `better-sqlite3`, plain JavaScript
-- **Desktop host:** Electron 28, vanilla HTML/CSS/JS
-- **Inference runtime:** `node-llama-cpp` for compatible local GGUF inference in v0.2
-- **Phone router:** Qwen3 4B Q4_K_M through MLC (planned v0.4)
-- **Landing:** static HTML/CSS/JS, suitable for Cloudflare Pages
-- **Payments:** Dodo Payments checkout API with `pricing_mode=by_country`
-- **Transport:** coordinator-provided HTTPS endpoints now; direct peer-to-peer fetch planned for v0.3
-- **Storage:** SQLite coordinator state and `~/.ii/experts/` host files
+| Target | Math |
+|---|---:|
+| Nominal routed expert IDs | 256 |
+| Desired assignments per desktop | 13 |
+| Desired devices per assignment cycle | `ceil(256 / 13) = 20` |
+| 400 placements | 20 target assignment groups |
 
-## Current status
+It is not proof of 20 executable model copies. A real MoE also contains shared attention, embeddings, normalization, routers, KV state, and experts associated with specific layers. Before claiming a full copy, II must publish an exact tensor topology and run one complete forward pass across physical hosts.
 
-### DONE
+The API therefore distinguishes:
 
-- [x] Express coordinator starts with `node server.js`
-- [x] Persistent SQLite device and Genesis application storage
-- [x] Desktop registration and stable device IDs
-- [x] Real `~/.ii/experts/` storage with streamed download, structural validation, and SHA-256 support
-- [x] Loopback `POST /infer` service on port 7777 backed by `node-llama-cpp` when a GGUF model loads
-- [x] Honest HTTP 503 `expert not loaded yet` response when no compatible model is loaded
-- [x] 30-second host heartbeats with a 60-second live-routing window
-- [x] Deterministic 13-expert assignments and real SQLite expert-map routing
-- [x] `/register` IP throttling at 10 requests per minute
-- [x] Bearer-protected Genesis CSV export at `GET /admin/genesis`
-- [x] Landing-page `/stats` polling every 10 seconds with explicit offline state
-- [x] Genesis form posting to the real `/genesis` persistence endpoint
-- [x] Dodo checkout-session API path plus `DODO_MONTHLY_URL` / `DODO_YEARLY_URL` fallback
-- [x] Idempotent Dodo `by_country` provisioning command with smallest-unit prices
-- [x] Country-localized pricing displayed as $20 / $10 / ₹249, plus tax
+- `storedCoveredExperts`: signed manifest artifacts stored by live hosts.
+- `coveredExperts`: those claims also marked inference-ready with a routable endpoint.
+- `storedFullCopies`: complete stored ID coverage.
+- `fullCopies`: complete routable ID coverage.
+- `readyWorkers`: complete worker-model replicas ready for pull jobs.
 
-### TODO-REAL
+Runtime readiness is currently signed and manifest-matched but still self-attested; remote challenge execution is a future hardening step.
 
-- [ ] Publish a production expert-0 artifact URL and checksum (tests use a local 10 MB safetensors fixture)
-- [ ] Supply a compatible GGUF expert/model and prove a real inference response on target host hardware
-- [ ] Build the adapter/export needed to execute raw DeepSeek expert safetensors (llama.cpp consumes GGUF, not safetensors)
-- [ ] Replace coordinator-mediated HTTPS endpoints with authenticated P2P transfer
-- [ ] Ship the Qwen3 4B MLC phone router and prompt-to-expert selection
-- [ ] Validate full expert execution and output merging across 20 physical hosts
-- [ ] Add production authentication, abuse controls, signed manifests, and encrypted peer traffic
-- [ ] Publish final Genesis eligibility and profit-pool legal terms
+## Security model
 
-## Roadmap
+### Hosts
 
-| Version | Milestone | Exit criterion |
-|---|---|---|
-| **v0.2** | Single-expert inference | One host stores a verified artifact and returns real local inference; unavailable models return HTTP 503 |
-| **v0.3** | P2P fetch | A client fetches an expert response directly from a coordinator-selected host |
-| **v0.4** | Phone router | Offline Qwen3 4B MLC router selects expert IDs and calls live routes |
-| **v1.0** | 20-device full copy | All 256 experts are covered and exercised across one physical 20-host group |
+On first run, the worker creates an Ed25519 key at `~/.ii/device-key.pem` with mode `0600`. Its device ID is the SHA-256 fingerprint of the public key. Every mutable host claim is signed with a five-minute clock window and monotonically increasing timestamp.
 
-## Run locally
+Unsigned hosting is disabled by default. `II_ALLOW_UNSIGNED_HOSTS=true` exists only for local migration and unsigned hosts never satisfy the normal production trust model.
 
-Requirements: Node.js 20+, npm, and a desktop environment for Electron. Configuration templates live in [`.env.example`](./.env.example), [`network/.env.example`](./network/.env.example), and [`client/.env.example`](./client/.env.example). The MVP reads the process environment directly; export the values through your shell or deployment platform.
+### Releases
 
-### 1. Coordinator
+A release operator keeps an Ed25519 private release key offline. Coordinators and clients receive only `II_RELEASE_PUBLIC_KEY`. A manifest is rejected if its payload, artifact hash, publisher, or manifest ID changes.
 
-```bash
-cd network && npm ci && npm start
-```
+A valid signature proves publisher authorization—not model quality, safety, or legal rights. The manifest additionally requires the operator to confirm redistribution review.
 
-The API and landing page are available at `http://localhost:8787`.
+### Jobs and teachings
 
-### 2. Desktop host
+Prompts, results, and accepted teaching text are AES-256-GCM encrypted in SQLite with `II_DATA_ENCRYPTION_KEY`. Submission tokens and receipt tokens are stored only as SHA-256 hashes. Logs do not print prompt or result text.
 
-```bash
-cd client && npm ci && npm start
-```
+The coordinator can decrypt work to lease it to a worker, and the worker sees plaintext while executing it. II does not yet provide confidential computing; users must assume the selected worker can inspect a remote prompt.
 
-Set `II_COORDINATOR_URL` first if the coordinator is not at `http://localhost:8787`.
-
-### 3. Static web preview
-
-```bash
-cd web && python3 -m http.server 8080
-```
-
-When web and API use different origins, set the `ii-api-base` meta value in `web/index.html` to the public coordinator origin and include the page origin in `ALLOWED_ORIGINS`.
-
-## API overview
-
-| Method | Route | Purpose |
-|---|---|---|
-| `POST` | `/register` | Register a host and receive its expert range |
-| `POST` | `/heartbeat` | Refresh host health and advertised expert range |
-| `GET` | `/stats` | Read live network coverage and Genesis counts |
-| `GET` | `/route?experts=0,1` | Find live hosts for required expert IDs |
-| `POST` | `/genesis` | Submit or refresh a Genesis host application |
-| `GET` | `/api/checkout/:plan` | Create or redirect to monthly/yearly Dodo checkout |
-
-Every public route also has an `/api/...` alias for the static landing page.
-
-## Dodo Payments setup
-
-1. In Dodo Payments, create two recurring products:
-   - **II Pro Monthly:** USD `2000` ($20.00), monthly.
-   - **II Pro Yearly:** USD `19200` ($192.00), yearly.
-2. Set `pricing_mode` to `by_country` on both products.
-3. Add localized prices in the smallest currency unit:
-   - India (`IN`): monthly INR `24900` (₹249.00), yearly INR `199900` (₹1,999.00).
-   - Tier 2 countries such as `BR`, `ID`, `PH`, `TR`, and `ZA`: monthly USD `1000`, yearly USD `9600`.
-   - Do not add overrides for Tier 1 fallback countries such as `US`, `GB`, `CA`, `AU`, and `DE`; they use the base USD price.
-4. Copy `network/.env.example` values into your deployment environment.
-5. Set `DODO_PAYMENTS_API_KEY`, `DODO_MONTHLY_PRODUCT_ID`, and `DODO_YEARLY_PRODUCT_ID`.
-6. Run `cd network && npm run configure:dodo` to verify base prices and idempotently apply the India and Tier 2 rules. Use `DODO_CONFIGURE_DRY_RUN=true` to preview writes.
-7. Alternatively, set pre-created payment links with `DODO_MONTHLY_URL` and `DODO_YEARLY_URL`.
-8. Start in `test_mode`, complete a test checkout, then switch to `live_mode` only after webhook and entitlement handling are configured.
-
-Taxes are calculated at checkout. Displayed prices therefore include the note **“+ tax.”**
-
-## Genesis 400
-
-The first 400 **verified, successfully registered hosts** are intended to receive:
-
-- lifetime II Pro while the published host requirements continue to be met,
-- a permanent Genesis host number, and
-- participation in a pool equal to 5% of qualifying network profit.
-
-The year-one target is $25 per qualifying host, not guaranteed income or an investment return. A form submission does not reserve a Genesis number; the coordinator assigns one only after the desktop host registers. Final eligibility, jurisdiction, tax, and distribution terms must be published before launch.
+See [the network threat model](./docs/NETWORK-THREAT-MODEL.md).
 
 ## Repository layout
 
 ```text
-network/   Express coordinator, SQLite schema, payment handoff
-client/    Electron desktop host
-web/       Static Cloudflare Pages landing page
-archive/   Earlier research prototypes retained for reference
+network/   Coordinator, manifests, encrypted jobs, teaching intake, Dodo
+client/    Signed Electron worker, artifact store, llama.cpp runtime
+protocol/  Dependency-free canonical signing and manifest protocol
+web/       Static landing page
+core/ ...  Earlier local research/tool engine retained in the repository
+archive/   Quarantined research experiments
 ```
+
+## Run the coordinator
+
+Requirements: Node.js 20+, npm, and a random encryption key.
+
+```bash
+cd network
+npm_config_nodedir=/usr/local npm ci   # nodedir is only needed where native headers are unavailable
+
+export II_ADMIN_API_TOKEN="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
+export ADMIN_EXPORT_TOKEN="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
+export II_JOB_API_TOKEN="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
+export II_TEACHING_API_TOKEN="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
+export II_DATA_ENCRYPTION_KEY="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64'))")"
+npm start
+```
+
+The API and landing page default to `http://localhost:8787`.
+
+## Publish a signed worker model
+
+II does not commit model weights or choose an unreviewed production checkpoint for the operator.
+
+1. Review the exact checkpoint license and commercial redistribution terms.
+2. Convert or obtain a `node-llama-cpp`-compatible GGUF.
+3. Host it over HTTPS.
+4. Compute its SHA-256 and exact byte size.
+5. Generate an offline release key:
+
+```bash
+cd network
+npm run keygen:release -- ./release-key.pem
+```
+
+6. Put the printed public key in coordinator and client `II_RELEASE_PUBLIC_KEY`.
+7. Copy and complete `network/model-manifest.example.json`.
+8. Sign it:
+
+```bash
+II_RELEASE_PRIVATE_KEY_PATH=./release-key.pem \
+  npm run sign:manifest -- model-manifest.json model-manifest.signed.json
+```
+
+9. Publish it using the admin token:
+
+```bash
+curl -X POST http://localhost:8787/admin/models \
+  -H "Authorization: Bearer $II_ADMIN_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data-binary @model-manifest.signed.json
+```
+
+10. Set the returned `manifest_id` as `II_MODEL_MANIFEST_ID` on workers. Keep `release-key.pem` offline and out of Git.
+
+## Run a desktop worker
+
+```bash
+cd client
+npm ci
+export II_COORDINATOR_URL=http://localhost:8787
+export II_RELEASE_PUBLIC_KEY='<trusted publisher key>'
+export II_MODEL_MANIFEST_ID='<64-character manifest id>'
+export II_ARTIFACT_ID=worker-q4
+npm start
+```
+
+The worker:
+
+1. verifies the signed release,
+2. resumes/downloads the exact content-addressed artifact,
+3. validates its hash and format,
+4. loads GGUF through `node-llama-cpp`,
+5. registers its signed identity and artifact claim,
+6. polls for compatible encrypted background jobs,
+7. returns real output or fails/requeues the job.
+
+If loading fails, `/infer` returns HTTP 503 `expert not loaded yet`, and the worker does not lease jobs.
+
+## Submit and read a background job
+
+```bash
+SUBMISSION=$(curl -sS -X POST http://localhost:8787/jobs \
+  -H "Authorization: Bearer $II_JOB_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"manifest_id":"MANIFEST_ID","prompt":"Research this topic","max_tokens":256}')
+```
+
+The response contains a one-time `access_token`. Save it; only its hash is stored.
+
+```bash
+curl http://localhost:8787/jobs/JOB_ID \
+  -H "Authorization: Bearer JOB_ACCESS_TOKEN"
+```
+
+Jobs are for background work. This endpoint is not a sub-second voice path.
+
+## Teach II intake
+
+`POST /teachings` is an intake and consent boundary—not automatic training. It requires:
+
+- the exact signed model manifest,
+- explicit consent version `2026-10-22`,
+- a prompt/correction pair,
+- no detected direct identifiers or common secrets,
+- `II_TEACHING_API_TOKEN`.
+
+Accepted text is encrypted and quarantined. The contributor receives a receipt token to inspect status or delete it. No code in v0.3 trains, merges, or publishes an adapter automatically.
+
+See [LEARNING-FLYWHEEL.md](./docs/LEARNING-FLYWHEEL.md).
+
+## API overview
+
+| Method | Route | Authentication | Purpose |
+|---|---|---|---|
+| `POST` | `/register` | Ed25519 host signature | Register identity and exact artifact claims |
+| `POST` | `/heartbeat` | Ed25519 host signature | Refresh signed live state |
+| `GET` | `/stats` | Public | Truthful stored/routable/worker counts |
+| `GET` | `/route?expert_ids=…` | Public | Find ready expert endpoints |
+| `GET` | `/models` | Public | List active signed releases |
+| `GET` | `/models/:id` | Public | Fetch one signed manifest |
+| `POST` | `/admin/models` | Admin bearer | Publish a trusted signed release |
+| `POST` | `/admin/hosts/:id/revoke` | Admin bearer | Revoke identity and requeue its lease |
+| `POST` | `/jobs` | Job API bearer | Submit encrypted background work |
+| `GET` | `/jobs/:id` | Job receipt bearer | Read status/result |
+| `POST` | `/jobs/:id/cancel` | Job receipt bearer | Cancel queued/leased work |
+| `POST` | `/worker/lease` | Ed25519 host signature | Lease compatible work |
+| `POST` | `/worker/jobs/:id/complete` | Host signature + lease token | Return real output |
+| `POST` | `/teachings` | Teaching API bearer | Submit consented correction to quarantine |
+| `DELETE` | `/teachings/:id` | Teaching receipt bearer | Withdraw and delete contribution |
+| `POST` | `/genesis` | Public | Apply for future host verification |
+| `GET` | `/admin/genesis` | Admin bearer | Export applications |
+
+## Payments
+
+Dodo checkout and `pricing_mode=by_country` provisioning remain available. Headline prices are `$20 / $10 / ₹249` plus tax. Production still requires provider credentials, signed webhook handling, subscription entitlements, cancellation/refund flows, and final Genesis legal terms. Checkout creation alone is not an entitlement system.
+
+## Tests
+
+```bash
+cd network && npm test
+cd client && npm test
+cd web && node --test index.test.js
+```
+
+The suites cover signed/tamper-resistant host messages, trusted manifests, PR #6 migration, assignment math, truthful routing, encryption at rest, job lease/completion, teaching privacy rejection, real resumable 10 MiB allocation, strict inference 503 behavior, Electron worker logic, Dodo contracts, and landing behavior.
+
+## Remaining product milestones
+
+- [ ] Select and legally review exact local-phone and worker checkpoints.
+- [ ] Ship Android wake word, offline STT/TTS, and benchmark-selected local model.
+- [ ] Implement local/private/background/cloud routing policy.
+- [ ] Add authenticated peer chunk transfer, NAT traversal, relays, and HTTP fallback.
+- [ ] Add remote readiness challenges and malicious-worker result verification.
+- [ ] Prove a two-desktop LAN pipeline with a runtime that really supports model splitting.
+- [ ] Define the exact MoE tensor topology before using 256/13/20 as executable capacity.
+- [ ] Build benchmark-gated adapter training with PII review, provenance, rollback, and human approval.
+- [ ] Add Dodo webhooks and durable subscription entitlements.
+- [ ] Publish Genesis eligibility, tax, profit-pool, and jurisdiction terms.
+- [ ] Move production coordination from one SQLite process to backed-up, horizontally safe infrastructure.
+
+See [ROADMAP.md](./ROADMAP.md) for dependency order and measurable exit criteria.
+
+## Non-negotiable product rules
+
+1. Never claim an assigned ID is an executable expert.
+2. Never return fabricated inference.
+3. Never use a WAN multi-host pipeline for the instant voice reflex path.
+4. Never load an unsigned or hash-mismatched release.
+5. Never auto-train on private chats or auto-merge community adapters.
+6. Never describe theoretical storage division as measured compute capacity.
 
 ## License
 
-See [LICENSE](./LICENSE).
+See [LICENSE](./LICENSE). Model checkpoints and user-contributed data have their own licenses and consent requirements; the repository license does not grant rights to redistribute arbitrary weights.

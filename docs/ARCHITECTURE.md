@@ -1,4 +1,8 @@
-# II v3.0 — Architecture
+# Historical local/BYOK engine architecture
+
+> This describes the retained Python tool engine, not the v0.3 decentralized
+> worker network. See [`NETWORK-ARCHITECTURE.md`](./NETWORK-ARCHITECTURE.md)
+> for host identities, signed releases, encrypted jobs, and worker execution.
 
 II combines a local tool engine with an optional OpenAI-compatible BYOK
 conversation/planning layer. Internet retrieval, Python algorithms, graphs,
