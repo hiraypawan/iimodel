@@ -417,10 +417,10 @@
     <main>
       <section class="intro" aria-labelledby="host-title">
         <p class="eyebrow">Join the first 400</p>
-        <h1 id="host-title">Put 20 GB to work.</h1>
-        <p class="lede">Become one node in a people-powered AI network. This preview reserves a sparse placeholder, registers your computer, and keeps it visible to the coordinator.</p>
+        <h1 id="host-title">Put one expert to work.</h1>
+        <p class="lede">Become one node in a people-powered AI network. The v0.2 host downloads and verifies one real expert artifact in <code>~/.ii/experts/</code>.</p>
         <ul class="facts">
-          <li><span class="check">✓</span> No model download or training in this MVP</li>
+          <li><span class="check">✓</span> Real bytes on disk with SHA-256 verification</li>
           <li><span class="check">✓</span> One heartbeat every 30 seconds</li>
           <li><span class="check">✓</span> Quit the app to leave the network</li>
         </ul>
@@ -448,8 +448,8 @@
               <span class="metric-label">Experts</span>
             </div>
             <div class="metric">
-              <span class="metric-value" id="shardValue">20 GB</span>
-              <span class="metric-label">Sparse shard</span>
+              <span class="metric-value" id="shardValue">—</span>
+              <span class="metric-label">Expert file</span>
             </div>
             <div class="metric">
               <span class="metric-value" id="latencyValue">—</span>
@@ -463,7 +463,7 @@
     </main>
 
     <footer>
-      <span>MVP routing is simulated. No inference workloads are accepted yet.</span>
+      <span>Local inference is real only after a compatible GGUF model loads; otherwise /infer returns 503.</span>
       <span class="coordinator" id="coordinatorText">Coordinator · http://localhost:8787</span>
     </footer>
   </div>
@@ -483,6 +483,12 @@
       coordinator: document.getElementById('coordinatorText'),
     };
 
+    function formatFileSize(bytes) {
+      if (!Number.isFinite(bytes)) return '—';
+      if (bytes >= 1024 ** 3) return `${(bytes / (1024 ** 3)).toFixed(1)} GB`;
+      return `${Math.max(0.1, bytes / (1024 ** 2)).toFixed(1)} MB`;
+    }
+
     function render(state) {
       elements.status.dataset.phase = state.phase || 'idle';
       elements.statusText.textContent = state.message || 'Ready to join the network';
@@ -490,7 +496,7 @@
       elements.error.textContent = state.error || '';
 
       if (state.expertsLabel) elements.experts.textContent = state.expertsLabel;
-      if (state.shardSizeGb) elements.shard.textContent = `${state.shardSizeGb} GB`;
+      if (Number.isFinite(state.expertSizeBytes)) elements.shard.textContent = formatFileSize(state.expertSizeBytes);
       if (Number.isFinite(state.latencyMs)) elements.latency.textContent = `${state.latencyMs} ms`;
 
       if (state.genesisNumber) {

@@ -1,14 +1,18 @@
 {
   "name": "ii-host-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Desktop host client for the II decentralized network MVP",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js"
+    "check": "node --check main.js",
+    "test": "node --test client.test.js"
   },
   "devDependencies": {
-    "electron": "45.0.0"
+    "electron": "28.3.3"
+  },
+  "dependencies": {
+    "node-llama-cpp": "3.5.0"
   }
 }

@@ -1,12 +1,14 @@
 {
   "name": "ii-network-coordinator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Coordinator for the II decentralized network MVP",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js"
+    "check": "node --check server.js",
+    "test": "node --test *.test.js",
+    "configure:dodo": "node configure-dodo.js"
   },
   "engines": {
     "node": ">=20"

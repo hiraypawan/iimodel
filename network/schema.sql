@@ -14,8 +14,12 @@ CREATE TABLE IF NOT EXISTS devices (
   genesis_number INTEGER NOT NULL UNIQUE,
   status TEXT NOT NULL DEFAULT 'online' CHECK (status IN ('online', 'offline')),
   latency_ms REAL,
+  country TEXT,
+  experts_start INTEGER CHECK (experts_start BETWEEN 0 AND 255),
+  experts_end INTEGER CHECK (experts_end BETWEEN 0 AND 255),
   registered_at INTEGER NOT NULL,
-  last_seen INTEGER NOT NULL
+  last_seen INTEGER NOT NULL,
+  last_heartbeat INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_devices_last_seen
@@ -34,12 +38,8 @@ CREATE TABLE IF NOT EXISTS device_experts (
 CREATE INDEX IF NOT EXISTS idx_device_experts_expert
   ON device_experts(expert_id, device_id);
 
-CREATE TABLE IF NOT EXISTS genesis_applications (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL COLLATE NOCASE UNIQUE,
+CREATE TABLE IF NOT EXISTS genesis (
+  email TEXT PRIMARY KEY COLLATE NOCASE,
   country TEXT NOT NULL,
-  device TEXT,
-  accepted_host_terms INTEGER NOT NULL DEFAULT 0 CHECK (accepted_host_terms IN (0, 1)),
   created_at INTEGER NOT NULL
 );
