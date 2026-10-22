@@ -58,6 +58,11 @@ Desktop.ini
 *.swo
 *~
 
+# --- Node / Electron ---
+node_modules/
+network/data/
+client/.ii-test/
+
 # --- Logs ---
 *.log
 npm-debug.log*
