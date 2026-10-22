@@ -14,6 +14,7 @@ env/
 # --- Large binaries / archives (DO NOT COMMIT) ---
 models/
 *.gguf
+*.safetensors
 *.bin
 *.zip
 *.tar

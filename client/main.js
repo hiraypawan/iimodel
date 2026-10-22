@@ -5,17 +5,22 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
+const { downloadExpert, DEFAULT_MAX_EXPERT_BYTES } = require('./expert-store');
+const { LocalInferenceServer } = require('./inference-server');
 
-const CLIENT_VERSION = '0.1.0';
+const CLIENT_VERSION = '0.2.0';
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 10_000;
-const SHARD_SIZE_BYTES = 20 * 1024 * 1024 * 1024;
+const EXPERT_ID = Number.parseInt(process.env.II_EXPERT_ID || '0', 10);
+const INFERENCE_PORT = Number.parseInt(process.env.II_INFERENCE_PORT || '7777', 10);
 
 let mainWindow;
 let heartbeatTimer;
 let heartbeatRunning = false;
 let isQuitting = false;
 let hostIdentity = null;
+let expertArtifact = null;
+let inferenceService = null;
 let coordinatorUrl = normalizeCoordinatorUrl(
   process.env.II_COORDINATOR_URL || 'http://localhost:8787',
 );
@@ -44,10 +49,6 @@ function normalizeCoordinatorUrl(value) {
 
 function stateDirectory() {
   return path.join(app.getPath('home'), '.ii');
-}
-
-function shardPath() {
-  return path.join(stateDirectory(), 'shard.bin');
 }
 
 function identityPath() {
@@ -86,25 +87,65 @@ async function loadOrCreateIdentity() {
   return hostIdentity;
 }
 
-async function createSparseShard() {
-  await fs.mkdir(stateDirectory(), { recursive: true, mode: 0o700 });
-  const location = shardPath();
-  const handle = await fs.open(location, 'a+', 0o600);
-
-  try {
-    const current = await handle.stat();
-    if (current.size !== SHARD_SIZE_BYTES) {
-      // Extending with truncate creates a sparse placeholder on supported file
-      // systems; it does not download or write model weights in this MVP.
-      await handle.truncate(SHARD_SIZE_BYTES);
-      await handle.sync();
-    }
-  } finally {
-    await handle.close();
+async function prepareExpertArtifact() {
+  const sourceUrl = process.env.II_EXPERT_SOURCE_URL;
+  if (!sourceUrl) {
+    throw new Error('II_EXPERT_SOURCE_URL is required before this device can host an expert.');
+  }
+  if (!Number.isInteger(EXPERT_ID) || EXPERT_ID < 0 || EXPERT_ID > 255) {
+    throw new Error('II_EXPERT_ID must be an integer from 0 to 255.');
   }
 
-  const stats = await fs.stat(location);
-  return { path: location, sizeBytes: stats.size };
+  const configuredMaxBytes = Number.parseInt(
+    process.env.II_EXPERT_MAX_BYTES || String(DEFAULT_MAX_EXPERT_BYTES),
+    10,
+  );
+  return downloadExpert({
+    homeDirectory: app.getPath('home'),
+    expertId: EXPERT_ID,
+    sourceUrl,
+    expectedSha256: process.env.II_EXPERT_SHA256,
+    maxBytes: configuredMaxBytes,
+    onProgress: ({ bytesWritten, contentLength }) => {
+      const total = contentLength ? ` / ${Math.round(contentLength / (1024 * 1024))} MB` : '';
+      publishState({
+        phase: 'preparing',
+        message: `Downloading expert ${EXPERT_ID}: ${Math.round(bytesWritten / (1024 * 1024))} MB${total}`,
+        expertBytesDownloaded: bytesWritten,
+      });
+    },
+  });
+}
+
+async function loadInferenceRuntime(artifact) {
+  if (!inferenceService?.server) throw new Error('Local inference service did not start.');
+  const modelPath = process.env.II_INFERENCE_MODEL_PATH
+    || (artifact.format === 'gguf' ? artifact.path : null);
+  const loaded = await inferenceService.loadModel(modelPath);
+  return {
+    loaded,
+    error: inferenceService.loadError,
+    endpoint: loaded ? cleanPublicInferenceUrl(process.env.II_PUBLIC_INFERENCE_URL) : null,
+  };
+}
+
+function cleanPublicInferenceUrl(value) {
+  if (!value) return null;
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error('II_PUBLIC_INFERENCE_URL must be a valid HTTPS URL.');
+  }
+  if (parsed.protocol !== 'https:'
+    && !(parsed.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(parsed.hostname))) {
+    throw new Error('II_PUBLIC_INFERENCE_URL must use HTTPS outside localhost.');
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('II_PUBLIC_INFERENCE_URL must not contain credentials.');
+  }
+  parsed.hash = '';
+  return parsed.toString();
 }
 
 async function postJson(route, payload, timeoutMs = REQUEST_TIMEOUT_MS) {
@@ -142,9 +183,13 @@ async function sendHeartbeat(status = 'online') {
 
   try {
     const { data, elapsedMs } = await postJson('/heartbeat', {
-      deviceId: hostIdentity.deviceId,
+      device_id: hostIdentity.deviceId,
+      experts_start: hostIdentity.expertId,
+      experts_end: hostIdentity.expertId,
+      expert_size_bytes: hostIdentity.expertSizeBytes,
+      endpoint: hostIdentity.inferenceEndpoint,
       status,
-      latencyMs: hostState.latencyMs ?? null,
+      latency_ms: hostState.latencyMs ?? null,
     }, status === 'offline' ? 2_000 : REQUEST_TIMEOUT_MS);
 
     if (status === 'online') {
@@ -185,35 +230,56 @@ async function startHosting() {
   try {
     publishState({
       phase: 'preparing',
-      message: 'Preparing your 20 GB sparse placeholder…',
+      message: `Preparing expert ${EXPERT_ID}…`,
       error: null,
     });
 
-    const [identity, shard] = await Promise.all([
+    const [identity, artifact] = await Promise.all([
       loadOrCreateIdentity(),
-      createSparseShard(),
+      prepareExpertArtifact(),
     ]);
+    expertArtifact = artifact;
+    // Remove only the known PR #6 placeholder after a verified real artifact exists.
+    await fs.rm(path.join(stateDirectory(), 'shard.bin'), { force: true });
+
+    publishState({
+      phase: 'preparing',
+      message: `Expert ${EXPERT_ID} verified. Checking inference runtime…`,
+      expertPath: artifact.path,
+      expertSizeBytes: artifact.sizeBytes,
+      expertFormat: artifact.format,
+      expertSha256: artifact.sha256,
+    });
+    const runtime = await loadInferenceRuntime(artifact);
 
     publishState({
       phase: 'connecting',
-      message: 'Registering with the coordinator…',
-      shardPath: shard.path,
-      shardSizeBytes: shard.sizeBytes,
+      message: 'Registering the expert with the coordinator…',
+      inferenceLoaded: runtime.loaded,
+      inferenceError: runtime.error,
     });
 
     const { data, elapsedMs } = await postJson('/register', {
-      deviceId: identity.deviceId,
+      device_id: identity.deviceId,
       deviceName: os.hostname(),
       platform: `${process.platform}-${process.arch}`,
       clientVersion: CLIENT_VERSION,
+      country: process.env.II_HOST_COUNTRY,
+      endpoint: runtime.endpoint,
+      expert_size_bytes: artifact.sizeBytes,
       memoryGb: Math.round((os.totalmem() / (1024 ** 3)) * 10) / 10,
     });
 
     const metadata = {
       ...identity,
       genesisNumber: data.genesisNumber,
-      experts: data.experts,
-      expertsLabel: data.expertsLabel,
+      assignedExperts: data.experts,
+      expertId: EXPERT_ID,
+      expertPath: artifact.path,
+      expertSha256: artifact.sha256,
+      expertSizeBytes: artifact.sizeBytes,
+      inferenceEndpoint: runtime.endpoint,
+      inferenceLoaded: runtime.loaded,
       registeredAt: data.registeredAt,
       coordinatorUrl,
     };
@@ -223,21 +289,29 @@ async function startHosting() {
       mode: 0o600,
     });
 
+    await sendHeartbeat('online');
     beginHeartbeatLoop();
     return publishState({
       phase: 'hosting',
-      message: 'Connected and hosting',
+      message: runtime.loaded
+        ? `Expert ${EXPERT_ID} loaded and serving real inference`
+        : `Expert ${EXPERT_ID} stored; inference is not loaded`,
       active: true,
       deviceId: data.deviceId,
       genesisNumber: data.genesisNumber,
       genesisMember: data.genesisMember,
-      experts: data.experts,
-      expertsLabel: data.expertsLabel,
-      shardSizeGb: data.shardSizeGb,
+      experts: [EXPERT_ID],
+      expertsLabel: String(EXPERT_ID),
+      expertPath: artifact.path,
+      expertSizeBytes: artifact.sizeBytes,
+      expertFormat: artifact.format,
+      inferenceLoaded: runtime.loaded,
+      inferenceError: runtime.error,
+      localInferenceEndpoint: inferenceService.localEndpoint,
       latencyMs: elapsedMs,
       lastHeartbeat: new Date().toISOString(),
       nextHeartbeatInMs: data.heartbeatIntervalMs,
-      error: null,
+      error: runtime.loaded ? null : runtime.error,
     });
   } catch (error) {
     return publishState({
@@ -289,13 +363,28 @@ function createWindow() {
 
 ipcMain.handle('host:get-state', () => hostState);
 ipcMain.handle('host:start', () => startHosting());
-ipcMain.handle('host:show-shard', async () => {
-  const location = shardPath();
-  await shell.showItemInFolder(location);
-  return location;
+ipcMain.handle('host:show-expert', async () => {
+  if (!expertArtifact?.path) throw new Error('No expert artifact is stored yet.');
+  await shell.showItemInFolder(expertArtifact.path);
+  return expertArtifact.path;
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  inferenceService = new LocalInferenceServer({
+    host: '127.0.0.1',
+    port: INFERENCE_PORT,
+    expertId: EXPERT_ID,
+  });
+  try {
+    await inferenceService.start();
+  } catch (error) {
+    publishState({
+      phase: 'error',
+      message: 'Local inference service could not start',
+      error: error.message,
+    });
+  }
+
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -307,6 +396,7 @@ app.on('before-quit', () => {
   isQuitting = true;
   clearInterval(heartbeatTimer);
   if (hostState.active) void sendHeartbeat('offline');
+  void inferenceService?.close();
 });
 
 app.on('window-all-closed', () => {

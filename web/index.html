@@ -626,7 +626,7 @@
         <div class="stat"><span class="stat-value" id="onlineHosts">—</span><span class="stat-label">Hosts online</span></div>
         <div class="stat"><span class="stat-value" id="expertCoverage">—</span><span class="stat-label">Expert coverage</span></div>
         <div class="stat"><span class="stat-value" id="hostedCapacity">—</span><span class="stat-label">Hosted capacity</span></div>
-        <div class="stat"><span class="stat-value" id="genesisRemaining">400</span><span class="stat-label">Genesis places left</span></div>
+        <div class="stat"><span class="stat-value" id="genesisRemaining">—</span><span class="stat-label">Genesis places left</span></div>
       </div>
     </div>
 
@@ -635,14 +635,14 @@
         <div class="section-head">
           <div class="section-kicker">How the network works</div>
           <h2>One model.<br>Hundreds of machines.</h2>
-          <p class="section-description">The MVP proves registration, liveness, and routing first. Real expert inference and peer-to-peer weight transfer come later—and are not claimed by this demo.</p>
+          <p class="section-description">Registration, liveness, and SQLite expert-map routing are live. The desktop now stores one verified artifact; full distributed inference and peer-to-peer transfer remain roadmap work.</p>
         </div>
         <div class="steps">
           <article class="step">
             <span class="step-number">01 / HOST</span>
             <div class="step-icon">20G</div>
             <h3>A PC holds a shard</h3>
-            <p>Each desktop reserves a 20 GB sparse placeholder for roughly 13 of the planned 256 experts and checks in every 30 seconds.</p>
+            <p>The v0.2 desktop writes one verified expert artifact to real disk and checks in every 30 seconds. The production target is 13 experts and 20 GB per host.</p>
           </article>
           <article class="step">
             <span class="step-number">02 / ROUTE</span>
@@ -654,7 +654,7 @@
             <span class="step-number">03 / MERGE</span>
             <div class="step-icon">Σ</div>
             <h3>Answers reunite</h3>
-            <p>Expert outputs will be fetched in parallel and merged on-device. MVP routes are simulated; no model weights move yet.</p>
+            <p>Expert outputs will be fetched in parallel and merged on-device. Coordinator routes now use live SQLite mappings; weight transfer and merging are not implemented yet.</p>
           </article>
         </div>
       </div>
@@ -671,16 +671,17 @@
           <div class="spec-list">
             <div class="spec"><span class="spec-value">671B</span><div class="spec-copy"><strong>Planned DeepSeek-V4-based MoE</strong><span>37B active parameters per token in the target architecture</span></div><span class="spec-status">Target</span></div>
             <div class="spec"><span class="spec-value">256</span><div class="spec-copy"><strong>Total experts</strong><span>Planned MoE expert pool across the network</span></div><span class="spec-status">Target</span></div>
-            <div class="spec"><span class="spec-value">13</span><div class="spec-copy"><strong>Experts per host</strong><span>Approximately 20 GB reserved by each desktop</span></div><span class="spec-status">MVP placeholder</span></div>
-            <div class="spec"><span class="spec-value">17</span><div class="spec-copy"><strong>Hosts per full copy</strong><span>340 GB ÷ 20 GB, before real-world overhead</span></div><span class="spec-status">Estimate</span></div>
-            <div class="spec"><span class="spec-value">30s</span><div class="spec-copy"><strong>Heartbeat cadence</strong><span>Coordinator marks stale hosts offline after 90 seconds</span></div><span class="spec-status">Live</span></div>
+            <div class="spec"><span class="spec-value">13</span><div class="spec-copy"><strong>Experts per host</strong><span>Approximately 17 GB of weights plus 3 GB runtime overhead</span></div><span class="spec-status">Target</span></div>
+            <div class="spec"><span class="spec-value">20</span><div class="spec-copy"><strong>Hosts per full copy</strong><span>ceil(256 experts ÷ 13 per host), including four redundant slots</span></div><span class="spec-status">Target</span></div>
+            <div class="spec"><span class="spec-value">30s</span><div class="spec-copy"><strong>Heartbeat cadence</strong><span>Coordinator excludes hosts after a 60-second live window</span></div><span class="spec-status">Live</span></div>
           </div>
+          <!-- TODO-REAL: Replace this browser demo with the Qwen3 MLC phone router. -->
           <div class="demo-console">
             <div class="console-top">
-              <span class="console-title">Phone router demo · simulated</span>
-              <button class="demo-button" id="routeDemo" type="button">Run route →</button>
+              <span class="console-title">Coordinator expert map · live</span>
+              <button class="demo-button" id="routeDemo" type="button">Query route →</button>
             </div>
-            <pre class="demo-output" id="routeOutput">Ready. Requests experts [12, 13, 14, 15, 16] and logs selected peers.</pre>
+            <pre class="demo-output" id="routeOutput">Ready. Queries expert 0 and logs only live, routable hosts.</pre>
           </div>
         </div>
       </div>
@@ -694,7 +695,7 @@
           <p class="section-description">Dodo Payments applies country pricing at checkout. The base product price is $20 USD per month.</p>
           <div class="billing-toggle" role="group" aria-label="Billing period">
             <button class="toggle-button active" type="button" data-billing="monthly">Monthly</button>
-            <button class="toggle-button" type="button" data-billing="yearly">Yearly <span class="save">save 20%</span></button>
+            <button class="toggle-button" type="button" data-billing="yearly">Yearly <span class="save">Tier 1 saves 20%</span></button>
           </div>
         </div>
 
@@ -704,7 +705,7 @@
             <div class="price-row"><span class="currency" id="baseCurrency">$</span><strong class="price" id="basePrice">20</strong><span class="period" id="basePeriod">/ month</span></div>
             <div class="billed" id="baseBilled">Billed monthly</div>
             <a class="button button-primary checkout-link" id="checkoutButton" href="/api/checkout/monthly">Continue to secure checkout <span class="arrow">↗</span></a>
-            <div class="payment-note">Checkout by Dodo Payments · localized with <code>by_country</code></div>
+            <div class="payment-note">Checkout by Dodo Payments · localized with <code>by_country</code> · + tax</div>
           </div>
           <div class="regional" aria-label="Regional prices">
             <div class="regional-row">
@@ -741,10 +742,7 @@
           <h3>Apply to host</h3>
           <p>Tell us where your future node will run. It takes under a minute.</p>
           <div class="field-grid">
-            <div class="field"><label for="name">Name</label><input id="name" name="name" autocomplete="name" maxlength="100" placeholder="Your name" required></div>
             <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required></div>
-          </div>
-          <div class="field-grid">
             <div class="field">
               <label for="country">Country</label>
               <select id="country" name="country" autocomplete="country-name" required>
@@ -759,12 +757,12 @@
                 <option value="Indonesia">Indonesia</option>
                 <option value="Philippines">Philippines</option>
                 <option value="Türkiye">Türkiye</option>
+                <option value="South Africa">South Africa</option>
                 <option value="Other">Other</option>
               </select>
             </div>
-            <div class="field"><label for="device">Host computer</label><input id="device" name="device" maxlength="160" placeholder="e.g. Windows PC, 32 GB RAM"></div>
           </div>
-          <label class="consent"><input name="acceptedHostTerms" type="checkbox" required><span>I understand the MVP creates a 20 GB logical sparse placeholder and that applying does not reserve a Genesis number.</span></label>
+          <label class="consent"><input name="acceptedHostTerms" type="checkbox" required><span>I understand the host downloads real expert data to <code>~/.ii/experts/</code> and that applying does not reserve a Genesis number.</span></label>
           <button class="button button-primary" type="submit" id="formSubmit">Apply for Genesis</button>
           <p class="form-message" id="formMessage" aria-live="polite"></p>
           <div class="fine-print">Genesis benefits and profit-pool participation require verification and are subject to the final published program terms. The $25 year-one figure is a target, not promised income or an investment return.</div>
@@ -807,14 +805,37 @@
       statElements.footerDot.classList.toggle('offline', !isOnline);
       statElements.heroDot.style.background = isOnline ? '' : '#697069';
       statElements.heroDot.style.boxShadow = isOnline ? '' : 'none';
-      statElements.coordinatorStatus.textContent = isOnline ? 'Coordinator online' : 'Coordinator offline';
+      statElements.coordinatorStatus.textContent = isOnline
+        ? 'Coordinator online · refreshes every 10s'
+        : 'Coordinator offline · retrying';
     }
 
+    function showOfflineStats() {
+      statElements.heroHosts.textContent = '—';
+      statElements.onlineHosts.textContent = '—';
+      statElements.expertCoverage.textContent = '—';
+      statElements.hostedCapacity.textContent = '—';
+      statElements.genesisRemaining.textContent = '—';
+      setCoordinatorOnline(false);
+    }
+
+    let statsRequestRunning = false;
     async function refreshStats() {
+      if (statsRequestRunning) return;
+      statsRequestRunning = true;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5_000);
       try {
-        const response = await fetch(apiUrl('/api/stats'), { headers: { Accept: 'application/json' } });
+        const response = await fetch(apiUrl('/stats'), {
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const stats = await response.json();
+        if (![stats.onlineHosts, stats.coveragePercent, stats.hostedCapacityGb, stats.genesisRemaining]
+          .every(Number.isFinite)) {
+          throw new Error('Coordinator returned invalid statistics');
+        }
         statElements.heroHosts.textContent = stats.onlineHosts.toLocaleString();
         statElements.onlineHosts.textContent = stats.onlineHosts.toLocaleString();
         statElements.expertCoverage.textContent = `${stats.coveragePercent}%`;
@@ -822,13 +843,16 @@
         statElements.genesisRemaining.textContent = stats.genesisRemaining.toLocaleString();
         setCoordinatorOnline(true);
       } catch (error) {
-        setCoordinatorOnline(false);
+        showOfflineStats();
         console.warn('[II] Coordinator stats unavailable:', error.message);
+      } finally {
+        clearTimeout(timeout);
+        statsRequestRunning = false;
       }
     }
 
     refreshStats();
-    setInterval(refreshStats, 30_000);
+    setInterval(refreshStats, 10_000);
 
     const billingButtons = document.querySelectorAll('[data-billing]');
     const basePrice = document.getElementById('basePrice');
@@ -855,31 +879,31 @@
     billingButtons.forEach((button) => button.addEventListener('click', () => setBilling(button.dataset.billing)));
     setBilling('monthly');
 
-    async function runPhoneRouterDemo(experts = [12, 13, 14, 15, 16]) {
+    async function runRouteDemo(experts = [0]) {
       const output = document.getElementById('routeOutput');
-      output.textContent = `Routing experts [${experts.join(', ')}]…`;
+      output.textContent = `Querying live map for expert ${experts.join(', ')}…`;
       try {
-        const response = await fetch(apiUrl(`/api/route?experts=${experts.join(',')}`));
+        const response = await fetch(apiUrl(`/route?expert_ids=${experts.join(',')}`));
         const route = await response.json();
         if (!response.ok) throw new Error(route.message || `HTTP ${response.status}`);
-        console.group('[II phone demo] Simulated expert route');
+        console.group('[II route] Live coordinator expert map');
         console.log('Requested experts:', route.requestedExperts);
         console.table(route.devices);
-        console.log(route.disclaimer);
         console.groupEnd();
-        const realPeers = route.devices.filter((device) => !device.deviceId.startsWith('demo-host')).length;
-        output.textContent = `SIMULATED · ${route.devices.length} peers selected (${realPeers} registered)\nDetails logged to the browser console.`;
+        output.textContent = route.devices.length
+          ? `LIVE MAP · ${route.devices.length} routable host${route.devices.length === 1 ? '' : 's'} found\nDetails logged to the browser console.`
+          : 'LIVE MAP · No routable host currently advertises expert 0.';
         return route;
       } catch (error) {
         output.textContent = `Coordinator unavailable · ${error.message}`;
-        console.warn('[II phone demo] Route failed:', error);
+        console.warn('[II route] Query failed:', error);
         return null;
       }
     }
 
-    window.IIPhoneDemo = runPhoneRouterDemo;
-    document.getElementById('routeDemo').addEventListener('click', () => runPhoneRouterDemo());
-    console.info('[II] Simulated phone router ready. Run IIPhoneDemo() to inspect a route.');
+    window.IIRouteDemo = runRouteDemo;
+    document.getElementById('routeDemo').addEventListener('click', () => runRouteDemo());
+    console.info('[II] Live expert-map query ready. Run IIRouteDemo([0]) to inspect a route.');
 
     const genesisForm = document.getElementById('genesisForm');
     const formSubmit = document.getElementById('formSubmit');
@@ -891,10 +915,8 @@
 
       const data = new FormData(genesisForm);
       const payload = {
-        name: data.get('name'),
         email: data.get('email'),
         country: data.get('country'),
-        device: data.get('device'),
         acceptedHostTerms: data.get('acceptedHostTerms') === 'on',
       };
 
@@ -904,7 +926,7 @@
       formMessage.textContent = '';
 
       try {
-        const response = await fetch(apiUrl('/api/genesis'), {
+        const response = await fetch(apiUrl('/genesis'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
