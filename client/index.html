@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src http://localhost:* https:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src http://localhost:* https:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>II Host</title>
   <style>
     :root {
@@ -411,18 +411,18 @@
   <div class="shell">
     <header>
       <div class="brand"><span class="mark">II</span> Internet Intelligence</div>
-      <div class="mvp-label">Host client · MVP</div>
+      <div class="mvp-label">Verified worker · v0.3</div>
     </header>
 
     <main>
       <section class="intro" aria-labelledby="host-title">
         <p class="eyebrow">Join the first 400</p>
-        <h1 id="host-title">Put one expert to work.</h1>
-        <p class="lede">Become one node in a people-powered AI network. The v0.2 host downloads and verifies one real expert artifact in <code>~/.ii/experts/</code>.</p>
+        <h1 id="host-title">Put verified compute to work.</h1>
+        <p class="lede">Become one node in a people-powered AI network. The v0.3 worker accepts only publisher-signed model manifests, proves its host identity, and can execute encrypted background jobs when a compatible GGUF loads.</p>
         <ul class="facts">
-          <li><span class="check">✓</span> Real bytes on disk with SHA-256 verification</li>
-          <li><span class="check">✓</span> One heartbeat every 30 seconds</li>
-          <li><span class="check">✓</span> Quit the app to leave the network</li>
+          <li><span class="check">✓</span> Signed release + exact SHA-256 verification</li>
+          <li><span class="check">✓</span> Ed25519-signed heartbeat every 30 seconds</li>
+          <li><span class="check">✓</span> Prompts are leased only to ready worker models</li>
         </ul>
       </section>
 
@@ -463,75 +463,11 @@
     </main>
 
     <footer>
-      <span>Local inference is real only after a compatible GGUF model loads; otherwise /infer returns 503.</span>
+      <span>No compatible GGUF means no jobs and an honest HTTP 503—never fabricated inference.</span>
       <span class="coordinator" id="coordinatorText">Coordinator · http://localhost:8787</span>
     </footer>
   </div>
 
-  <script>
-    const { ipcRenderer } = require('electron');
-
-    const elements = {
-      status: document.getElementById('status'),
-      statusText: document.getElementById('statusText'),
-      genesisTag: document.getElementById('genesisTag'),
-      experts: document.getElementById('expertsValue'),
-      shard: document.getElementById('shardValue'),
-      latency: document.getElementById('latencyValue'),
-      button: document.getElementById('startButton'),
-      error: document.getElementById('errorText'),
-      coordinator: document.getElementById('coordinatorText'),
-    };
-
-    function formatFileSize(bytes) {
-      if (!Number.isFinite(bytes)) return '—';
-      if (bytes >= 1024 ** 3) return `${(bytes / (1024 ** 3)).toFixed(1)} GB`;
-      return `${Math.max(0.1, bytes / (1024 ** 2)).toFixed(1)} MB`;
-    }
-
-    function render(state) {
-      elements.status.dataset.phase = state.phase || 'idle';
-      elements.statusText.textContent = state.message || 'Ready to join the network';
-      elements.coordinator.textContent = `Coordinator · ${state.coordinatorUrl}`;
-      elements.error.textContent = state.error || '';
-
-      if (state.expertsLabel) elements.experts.textContent = state.expertsLabel;
-      if (Number.isFinite(state.expertSizeBytes)) elements.shard.textContent = formatFileSize(state.expertSizeBytes);
-      if (Number.isFinite(state.latencyMs)) elements.latency.textContent = `${state.latencyMs} ms`;
-
-      if (state.genesisNumber) {
-        elements.genesisTag.textContent = state.genesisMember
-          ? `Genesis host #${state.genesisNumber}`
-          : `Host #${state.genesisNumber}`;
-      }
-
-      const busy = ['preparing', 'connecting'].includes(state.phase);
-      elements.button.disabled = busy || state.active;
-      elements.button.textContent = busy
-        ? 'Setting up your node…'
-        : state.active
-          ? 'Hosting is active'
-          : state.phase === 'error'
-            ? 'Try again'
-            : 'Become a host';
-    }
-
-    elements.button.addEventListener('click', async () => {
-      elements.button.disabled = true;
-      try {
-        render(await ipcRenderer.invoke('host:start'));
-      } catch (error) {
-        render({
-          phase: 'error',
-          message: 'Could not start hosting',
-          coordinatorUrl: 'http://localhost:8787',
-          error: error.message,
-        });
-      }
-    });
-
-    ipcRenderer.on('host:status', (_event, state) => render(state));
-    ipcRenderer.invoke('host:get-state').then(render);
-  </script>
+  <script src="./renderer.js"></script>
 </body>
 </html>

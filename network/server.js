@@ -5,6 +5,16 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const express = require('express');
 const Database = require('better-sqlite3');
+const { installJobRoutes } = require('./jobs');
+const { installLearningRoutes } = require('./learning');
+const { installModelRoutes, validateArtifactClaim } = require('./model-registry');
+const {
+  authenticateHost,
+  parseEncryptionKey,
+  requireConfiguredBearer,
+  secureTokenMatch,
+  sendHostAuthError,
+} = require('./security');
 
 const PORT = Number.parseInt(process.env.PORT || '8787', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -41,7 +51,24 @@ ensureColumn('devices', 'country', 'TEXT');
 ensureColumn('devices', 'experts_start', 'INTEGER');
 ensureColumn('devices', 'experts_end', 'INTEGER');
 ensureColumn('devices', 'last_heartbeat', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('devices', 'public_key', 'TEXT');
+ensureColumn('devices', 'last_signed_at', 'INTEGER NOT NULL DEFAULT 0');
 db.exec('CREATE INDEX IF NOT EXISTS idx_devices_last_heartbeat ON devices(last_heartbeat DESC)');
+
+// v0.2 mixed desired assignments with claims of files actually hosted. Preserve
+// those rows as placement advice, but do not count an unverifiable legacy claim
+// as executable capacity.
+const artifactTruthMigration = db
+  .prepare("SELECT value FROM network_meta WHERE key = 'artifact_truth_v1'")
+  .get();
+if (!artifactTruthMigration) {
+  db.exec(`
+    INSERT OR IGNORE INTO device_assignments (device_id, expert_id)
+    SELECT device_id, expert_id FROM device_experts;
+    DELETE FROM device_experts;
+    INSERT INTO network_meta (key, value) VALUES ('artifact_truth_v1', 'complete');
+  `);
+}
 
 const legacyGenesisExists = db.prepare(`
   SELECT 1 AS found FROM sqlite_master
@@ -62,7 +89,7 @@ if (process.env.TRUST_PROXY) {
     ? true
     : /^\d+$/.test(trustProxy) ? Number.parseInt(trustProxy, 10) : trustProxy);
 }
-app.use(express.json({ limit: '32kb' }));
+app.use(express.json({ limit: '128kb' }));
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '*')
   .split(',')
@@ -79,7 +106,7 @@ app.use((req, res, next) => {
   }
 
   res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-  res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.set('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
   res.set('Cache-Control', 'no-store');
 
   if (req.method === 'OPTIONS') {
@@ -146,13 +173,6 @@ function parseOptionalNumber(value, min, max) {
   return Math.round(number * 100) / 100;
 }
 
-function parseHostedSizeGb(value) {
-  if (value === null || value === undefined || value === '') return null;
-  const bytes = Number(value);
-  if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > 100 * (1024 ** 3)) return null;
-  return Math.round((bytes / (1024 ** 3)) * 1_000_000) / 1_000_000;
-}
-
 function normalizeCountry(value) {
   const country = cleanText(value, 2).toUpperCase();
   return /^[A-Z]{2}$/.test(country) ? country : null;
@@ -182,23 +202,9 @@ function assignedExperts(genesisNumber) {
   );
 }
 
-function expertsFromRange(start, end) {
-  if (!Number.isInteger(start) || !Number.isInteger(end)) return [];
-  if (start < 0 || start >= EXPERT_COUNT || end < 0 || end >= EXPERT_COUNT) return [];
-
-  const experts = [];
-  let current = start;
-  while (experts.length < EXPERT_COUNT) {
-    experts.push(current);
-    if (current === end) return experts;
-    current = (current + 1) % EXPERT_COUNT;
-  }
-  return [];
-}
-
 function expertsForDevice(device) {
   const expertIds = db
-    .prepare('SELECT expert_id FROM device_experts WHERE device_id = ? ORDER BY expert_id')
+    .prepare('SELECT expert_id FROM device_assignments WHERE device_id = ? ORDER BY expert_id')
     .all(device.id)
     .map((row) => row.expert_id);
   if (!expertIds.length) return [];
@@ -236,11 +242,13 @@ const insertDevice = db.prepare(`
   INSERT INTO devices (
     id, device_name, platform, client_version, ip_address, endpoint,
     memory_gb, shard_size_gb, genesis_number, status, latency_ms,
-    country, experts_start, experts_end, registered_at, last_seen, last_heartbeat
+    country, experts_start, experts_end, public_key, last_signed_at,
+    registered_at, last_seen, last_heartbeat
   ) VALUES (
     @id, @deviceName, @platform, @clientVersion, @ipAddress, @endpoint,
     @memoryGb, @shardSizeGb, @genesisNumber, 'online', @latencyMs,
-    @country, @expertsStart, @expertsEnd, @now, @now, @now
+    @country, @expertsStart, @expertsEnd, @publicKey, @signedAt,
+    @now, @now, @now
   )
 `);
 
@@ -258,20 +266,81 @@ const updateDeviceRegistration = db.prepare(`
       experts_end = COALESCE(@expertsEnd, experts_end),
       status = 'online',
       latency_ms = COALESCE(@latencyMs, latency_ms),
+      public_key = COALESCE(@publicKey, public_key),
+      last_signed_at = CASE WHEN @signedAt > last_signed_at THEN @signedAt ELSE last_signed_at END,
       last_seen = @now,
       last_heartbeat = @now
   WHERE id = @id
 `);
 
-const deleteDeviceExperts = db.prepare('DELETE FROM device_experts WHERE device_id = ?');
-const insertDeviceExpert = db.prepare(
-  'INSERT INTO device_experts (device_id, expert_id) VALUES (?, ?)',
+const deleteDeviceAssignments = db.prepare('DELETE FROM device_assignments WHERE device_id = ?');
+const insertDeviceAssignment = db.prepare(
+  'INSERT INTO device_assignments (device_id, expert_id) VALUES (?, ?)',
 );
 
-function replaceDeviceExperts(deviceId, experts) {
-  deleteDeviceExperts.run(deviceId);
-  for (const expertId of experts) insertDeviceExpert.run(deviceId, expertId);
+function replaceDeviceAssignments(deviceId, experts) {
+  deleteDeviceAssignments.run(deviceId);
+  for (const expertId of experts) insertDeviceAssignment.run(deviceId, expertId);
 }
+
+function validateArtifactClaims(body) {
+  const supplied = body.artifacts ?? (body.artifact ? [body.artifact] : []);
+  if (!Array.isArray(supplied) || supplied.length > 32) {
+    return { ok: false, message: 'artifacts must be an array containing at most 32 manifest-backed claims.' };
+  }
+  const claims = [];
+  const seen = new Set();
+  for (const candidate of supplied) {
+    const result = validateArtifactClaim(db, candidate);
+    if (!result.ok) return result;
+    const key = `${result.claim.manifest_id}:${result.claim.artifact_id}`;
+    if (seen.has(key)) return { ok: false, message: 'Duplicate artifact claim.' };
+    seen.add(key);
+    claims.push(result.claim);
+  }
+  return { ok: true, claims };
+}
+
+const replaceHostedArtifacts = db.transaction((deviceId, claims, now) => {
+  db.prepare('DELETE FROM host_artifacts WHERE device_id = ?').run(deviceId);
+  db.prepare('DELETE FROM device_experts WHERE device_id = ?').run(deviceId);
+  const insertArtifact = db.prepare(`
+    INSERT INTO host_artifacts (
+      device_id, manifest_id, artifact_id, sha256, size_bytes, format,
+      expert_id, inference_ready, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertExpert = db.prepare(
+    'INSERT OR IGNORE INTO device_experts (device_id, expert_id) VALUES (?, ?)',
+  );
+  let totalBytes = 0;
+  for (const claim of claims) {
+    insertArtifact.run(
+      deviceId,
+      claim.manifest_id,
+      claim.artifact_id,
+      claim.sha256,
+      claim.size_bytes,
+      claim.format,
+      claim.expert_id,
+      claim.inference_ready ? 1 : 0,
+      now,
+    );
+    if (Number.isInteger(claim.expert_id)) insertExpert.run(deviceId, claim.expert_id);
+    totalBytes += claim.size_bytes;
+  }
+  db.prepare('UPDATE devices SET shard_size_gb = ? WHERE id = ?')
+    .run(Math.round((totalBytes / (1024 ** 3)) * 1_000_000) / 1_000_000, deviceId);
+  if (claims.length > 0) {
+    const nextGenesis = db.prepare(`
+      SELECT COALESCE(MAX(genesis_number), 0) + 1 AS number FROM genesis_hosts
+    `).get().number;
+    db.prepare(`
+      INSERT OR IGNORE INTO genesis_hosts (device_id, genesis_number, verified_at)
+      SELECT id, ?, ? FROM devices WHERE id = ? AND public_key IS NOT NULL
+    `).run(nextGenesis, now, deviceId);
+  }
+});
 
 const registerDevice = db.transaction((details) => {
   let device = db.prepare('SELECT * FROM devices WHERE id = ?').get(details.id);
@@ -291,13 +360,13 @@ const registerDevice = db.transaction((details) => {
       expertsStart: experts[0],
       expertsEnd: experts[experts.length - 1],
     });
-    replaceDeviceExperts(details.id, experts);
+    replaceDeviceAssignments(details.id, experts);
     created = true;
   } else {
     experts = expertsForDevice(device);
     if (experts.length !== EXPERTS_PER_DEVICE) {
       experts = assignedExperts(device.genesis_number);
-      replaceDeviceExperts(details.id, experts);
+      replaceDeviceAssignments(details.id, experts);
     }
     updateDeviceRegistration.run({
       ...details,
@@ -312,12 +381,17 @@ const registerDevice = db.transaction((details) => {
 
 function registrationPayload(device) {
   const experts = expertsForDevice(device);
+  const genesis = db.prepare(`
+    SELECT genesis_number, verified_at FROM genesis_hosts WHERE device_id = ?
+  `).get(device.id);
   return {
     deviceId: device.id,
     device_id: device.id,
     status: device.status,
-    genesisNumber: device.genesis_number,
-    genesisMember: device.genesis_number <= GENESIS_LIMIT,
+    hostNumber: device.genesis_number,
+    genesisNumber: genesis?.genesis_number ?? null,
+    genesisMember: Boolean(genesis && genesis.genesis_number <= GENESIS_LIMIT),
+    genesisVerifiedAt: genesis ? new Date(genesis.verified_at).toISOString() : null,
     experts,
     expertsStart: experts[0],
     expertsEnd: experts[experts.length - 1],
@@ -334,12 +408,20 @@ function registrationPayload(device) {
 
 function registerHandler(req, res) {
   const body = req.body || {};
-  const deviceId = body.device_id || body.deviceId || crypto.randomUUID();
+  const deviceId = body.device_id || body.deviceId;
   if (!isValidDeviceId(deviceId)) {
     return res.status(400).json({
       error: 'invalid_device_id',
       message: 'deviceId must be 3–128 letters, numbers, dots, colons, underscores, or hyphens.',
     });
+  }
+
+  const auth = authenticateHost(db, 'host:register', body, { allowNew: true });
+  if (!auth.ok) return sendHostAuthError(res, auth);
+
+  const artifactResult = validateArtifactClaims(body);
+  if (!artifactResult.ok) {
+    return res.status(400).json({ error: 'invalid_artifact_claim', message: artifactResult.message });
   }
 
   const endpoint = normalizeInferenceEndpoint(body.endpoint);
@@ -350,16 +432,18 @@ function registerHandler(req, res) {
     });
   }
 
-  const suppliedExpertBytes = body.expert_size_bytes ?? body.expertSizeBytes;
-  const hostedSizeGb = parseHostedSizeGb(suppliedExpertBytes);
-  if (suppliedExpertBytes !== undefined && hostedSizeGb === null) {
+  if (endpoint && !artifactResult.claims.some((claim) => claim.inference_ready)) {
     return res.status(400).json({
-      error: 'invalid_expert_size',
-      message: 'expert_size_bytes must be a non-negative integer no larger than 100 GiB.',
+      error: 'endpoint_not_ready',
+      message: 'A public inference endpoint may be advertised only with a manifest-backed ready artifact.',
     });
   }
 
   const now = Date.now();
+  const hostedSizeGb = Math.round((artifactResult.claims.reduce(
+    (total, claim) => total + claim.size_bytes,
+    0,
+  ) / (1024 ** 3)) * 1_000_000) / 1_000_000;
   const details = {
     id: deviceId,
     deviceName: cleanText(body.deviceName, 100, `II Host ${deviceId.slice(0, 8)}`),
@@ -371,41 +455,43 @@ function registerHandler(req, res) {
     hostedSizeGb,
     memoryGb: parseOptionalNumber(body.memoryGb, 0, 16_384),
     latencyMs: parseOptionalNumber(body.latencyMs, 0, 60_000),
+    publicKey: auth.publicKey,
+    signedAt: auth.signedAt,
     now,
   };
 
-  const { device, created } = registerDevice(details);
-  return res.status(created ? 201 : 200).json({
+  const registration = registerDevice(details);
+  replaceHostedArtifacts(deviceId, artifactResult.claims, now);
+  const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(deviceId);
+  return res.status(registration.created ? 201 : 200).json({
     ok: true,
+    identityVerified: !auth.legacy,
+    artifactClaims: artifactResult.claims.length,
     ...registrationPayload(device),
   });
 }
 
-// TODO-REAL: Authenticate signed host identities before accepting advertised ranges.
 const recordHeartbeat = db.transaction((details) => {
-  replaceDeviceExperts(details.deviceId, details.experts);
+  replaceHostedArtifacts(details.deviceId, details.claims, details.now);
   db.prepare(`
     UPDATE devices
     SET status = ?,
         last_seen = ?,
         last_heartbeat = ?,
-        experts_start = ?,
-        experts_end = ?,
-        shard_size_gb = COALESCE(?, shard_size_gb),
         latency_ms = COALESCE(?, latency_ms),
-        endpoint = COALESCE(?, endpoint),
-        ip_address = ?
+        endpoint = ?,
+        ip_address = ?,
+        last_signed_at = CASE WHEN ? > last_signed_at THEN ? ELSE last_signed_at END
     WHERE id = ?
   `).run(
     details.status,
     details.now,
     details.now,
-    details.experts[0],
-    details.experts[details.experts.length - 1],
-    details.hostedSizeGb,
     details.latencyMs,
     details.endpoint,
     details.ipAddress,
+    details.signedAt,
+    details.signedAt,
     details.deviceId,
   );
 });
@@ -420,42 +506,12 @@ function heartbeatHandler(req, res) {
     });
   }
 
-  const existing = db.prepare('SELECT * FROM devices WHERE id = ?').get(deviceId);
-  if (!existing) {
-    return res.status(404).json({
-      error: 'device_not_registered',
-      message: 'Register this device before sending heartbeats.',
-    });
-  }
+  const auth = authenticateHost(db, 'host:heartbeat', body);
+  if (!auth.ok) return sendHostAuthError(res, auth);
 
-  const suppliedStart = body.experts_start ?? body.expertsStart;
-  const suppliedEnd = body.experts_end ?? body.expertsEnd;
-  if ((suppliedStart === undefined) !== (suppliedEnd === undefined)) {
-    return res.status(400).json({
-      error: 'invalid_expert_range',
-      message: 'experts_start and experts_end must be sent together.',
-    });
-  }
-
-  let experts = expertsForDevice(existing);
-  if (suppliedStart !== undefined) {
-    const start = Number(suppliedStart);
-    const end = Number(suppliedEnd);
-    experts = expertsFromRange(start, end);
-    if (!Number.isInteger(start) || !Number.isInteger(end)
-      || experts.length < 1 || experts.length > EXPERTS_PER_DEVICE) {
-      return res.status(400).json({
-        error: 'invalid_expert_range',
-        message: `The advertised range must contain 1–${EXPERTS_PER_DEVICE} experts from 0–255.`,
-      });
-    }
-  }
-
-  if (!experts.length) {
-    return res.status(409).json({
-      error: 'no_experts_assigned',
-      message: 'Register again to receive an expert assignment.',
-    });
+  const artifactResult = validateArtifactClaims(body);
+  if (!artifactResult.ok) {
+    return res.status(400).json({ error: 'invalid_artifact_claim', message: artifactResult.message });
   }
 
   const status = body.status === 'offline' ? 'offline' : 'online';
@@ -467,12 +523,10 @@ function heartbeatHandler(req, res) {
       message: 'endpoint must use HTTPS (localhost HTTP is allowed for development).',
     });
   }
-  const suppliedExpertBytes = body.expert_size_bytes ?? body.expertSizeBytes;
-  const hostedSizeGb = parseHostedSizeGb(suppliedExpertBytes);
-  if (suppliedExpertBytes !== undefined && hostedSizeGb === null) {
+  if (endpoint && !artifactResult.claims.some((claim) => claim.inference_ready)) {
     return res.status(400).json({
-      error: 'invalid_expert_size',
-      message: 'expert_size_bytes must be a non-negative integer no larger than 100 GiB.',
+      error: 'endpoint_not_ready',
+      message: 'A public inference endpoint requires a manifest-backed ready artifact.',
     });
   }
   const now = Date.now();
@@ -481,10 +535,10 @@ function heartbeatHandler(req, res) {
     deviceId,
     status,
     now,
-    experts,
-    hostedSizeGb,
+    claims: artifactResult.claims,
     latencyMs,
     endpoint,
+    signedAt: auth.signedAt,
     ipAddress: cleanText(req.ip, 64, null),
   });
 
@@ -492,9 +546,12 @@ function heartbeatHandler(req, res) {
     ok: true,
     deviceId,
     device_id: deviceId,
+    identityVerified: !auth.legacy,
     status,
-    experts_start: experts[0],
-    experts_end: experts[experts.length - 1],
+    artifactClaims: artifactResult.claims.length,
+    hostedExperts: artifactResult.claims
+      .map((claim) => claim.expert_id)
+      .filter(Number.isInteger),
     serverTime: new Date(now).toISOString(),
     nextHeartbeatInMs: HEARTBEAT_INTERVAL_MS,
   });
@@ -512,47 +569,90 @@ function networkStats() {
 
   const totalHosts = db.prepare('SELECT COUNT(*) AS count FROM devices').get().count;
   const onlineHosts = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM devices
-    WHERE status = 'online' AND last_heartbeat >= ? AND shard_size_gb > 0
+    SELECT COUNT(DISTINCT d.id) AS count
+    FROM devices d
+    JOIN host_artifacts ha ON ha.device_id = d.id
+    JOIN model_manifests m ON m.manifest_id = ha.manifest_id AND m.active = 1
+    WHERE d.status = 'online' AND d.last_heartbeat >= ? AND d.public_key IS NOT NULL
   `).get(cutoff).count;
-  const hostedCapacityGb = db.prepare(`
-    SELECT COALESCE(SUM(shard_size_gb), 0) AS total
-    FROM devices
-    WHERE status = 'online' AND last_heartbeat >= ? AND shard_size_gb > 0
+  const hostedCapacityBytes = db.prepare(`
+    SELECT COALESCE(SUM(ha.size_bytes), 0) AS total
+    FROM host_artifacts ha
+    JOIN devices d ON d.id = ha.device_id
+    JOIN model_manifests m ON m.manifest_id = ha.manifest_id AND m.active = 1
+    WHERE d.status = 'online' AND d.last_heartbeat >= ? AND d.public_key IS NOT NULL
   `).get(cutoff).total;
 
-  const coverageRows = db.prepare(`
-    SELECT de.expert_id, COUNT(*) AS replicas
-    FROM device_experts de
-    JOIN devices d ON d.id = de.device_id
-    WHERE d.status = 'online'
-      AND d.last_heartbeat >= ?
-      AND d.shard_size_gb > 0
-      AND d.endpoint IS NOT NULL
-    GROUP BY de.expert_id
+  const storedCoverageRows = db.prepare(`
+    SELECT ha.expert_id, COUNT(*) AS replicas
+    FROM host_artifacts ha
+    JOIN devices d ON d.id = ha.device_id
+    JOIN model_manifests m ON m.manifest_id = ha.manifest_id AND m.active = 1
+    WHERE d.status = 'online' AND d.last_heartbeat >= ?
+      AND d.public_key IS NOT NULL AND ha.expert_id IS NOT NULL
+    GROUP BY ha.expert_id
   `).all(cutoff);
+  const routableCoverageRows = db.prepare(`
+    SELECT ha.expert_id, COUNT(*) AS replicas
+    FROM host_artifacts ha
+    JOIN devices d ON d.id = ha.device_id
+    JOIN model_manifests m ON m.manifest_id = ha.manifest_id AND m.active = 1
+    WHERE d.status = 'online' AND d.last_heartbeat >= ?
+      AND d.public_key IS NOT NULL AND d.endpoint IS NOT NULL
+      AND ha.expert_id IS NOT NULL AND ha.inference_ready = 1
+    GROUP BY ha.expert_id
+  `).all(cutoff);
+  const readyWorkers = db.prepare(`
+    SELECT COUNT(DISTINCT d.id) AS count
+    FROM host_artifacts ha
+    JOIN devices d ON d.id = ha.device_id
+    JOIN model_manifests m ON m.manifest_id = ha.manifest_id
+    WHERE m.active = 1 AND m.role = 'worker' AND ha.inference_ready = 1
+      AND d.public_key IS NOT NULL AND d.status = 'online' AND d.last_heartbeat >= ?
+  `).get(cutoff).count;
 
-  const coveredExperts = coverageRows.length;
-  const fullCopies = coveredExperts === EXPERT_COUNT
-    ? Math.min(...coverageRows.map((row) => row.replicas))
+  const storedCoveredExperts = storedCoverageRows.length;
+  const coveredExperts = routableCoverageRows.length;
+  const storedFullCopies = storedCoveredExperts === EXPERT_COUNT
+    ? Math.min(...storedCoverageRows.map((row) => row.replicas))
     : 0;
-  const applications = db
-    .prepare('SELECT COUNT(*) AS count FROM genesis')
-    .get().count;
-  const genesisClaimed = Math.min(totalHosts, GENESIS_LIMIT);
+  const fullCopies = coveredExperts === EXPERT_COUNT
+    ? Math.min(...routableCoverageRows.map((row) => row.replicas))
+    : 0;
+  const applications = db.prepare('SELECT COUNT(*) AS count FROM genesis').get().count;
+  const verifiedHosts = db.prepare(`
+    SELECT COUNT(DISTINCT d.id) AS count
+    FROM devices d JOIN host_artifacts ha ON ha.device_id = d.id
+    WHERE d.public_key IS NOT NULL
+  `).get().count;
+  const genesisClaimed = db.prepare(`
+    SELECT COUNT(*) AS count FROM genesis_hosts WHERE genesis_number <= ?
+  `).get(GENESIS_LIMIT).count;
+  const jobCounts = db.prepare(`
+    SELECT
+      SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued,
+      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed
+    FROM jobs
+  `).get();
 
   return {
     ok: true,
-    network: 'II decentralized MVP',
+    network: 'II decentralized worker network',
     onlineHosts,
     totalHosts,
+    identityVerifiedHosts: verifiedHosts,
+    readyWorkers,
+    storedCoveredExperts,
     coveredExperts,
     totalExperts: EXPERT_COUNT,
     coveragePercent: Math.round((coveredExperts / EXPERT_COUNT) * 10_000) / 100,
+    storedFullCopies,
     fullCopies,
-    hostedCapacityGb: Math.round(hostedCapacityGb * 100) / 100,
+    coverageMeaning: 'manifest-matched, signed, live, inference-ready expert claims',
+    hostedCapacityGb: Math.round((hostedCapacityBytes / (1024 ** 3)) * 100) / 100,
     hostTargetGb: HOST_TARGET_GB,
+    queuedJobs: jobCounts.queued || 0,
+    completedJobs: jobCounts.completed || 0,
     genesisClaimed,
     genesisRemaining: Math.max(0, GENESIS_LIMIT - genesisClaimed),
     genesisApplications: applications,
@@ -561,7 +661,8 @@ function networkStats() {
   };
 }
 
-// TODO-REAL: Replace prompt hashing with expert IDs selected by the Qwen3 phone router.
+// TODO-REAL: Replace research-only prompt hashing with IDs produced by a measured,
+// versioned router for an exact executable model topology.
 function expertsForPrompt(prompt) {
   const selected = new Set();
   let round = 0;
@@ -612,16 +713,21 @@ function routeHandler(req, res) {
            d.country,
            d.latency_ms,
            d.last_heartbeat,
-           GROUP_CONCAT(de.expert_id) AS matched_experts
+           ha.manifest_id,
+           GROUP_CONCAT(ha.expert_id) AS matched_experts
     FROM devices d
-    JOIN device_experts de ON de.device_id = d.id
-    WHERE de.expert_id IN (${placeholders})
+    JOIN host_artifacts ha ON ha.device_id = d.id
+    JOIN model_manifests m ON m.manifest_id = ha.manifest_id AND m.active = 1
+    WHERE ha.expert_id IN (${placeholders})
+      AND ha.inference_ready = 1
+      AND d.public_key IS NOT NULL
       AND d.status = 'online'
       AND d.last_heartbeat >= ?
-      AND d.shard_size_gb > 0
       AND d.endpoint IS NOT NULL
-    GROUP BY d.id
-    ORDER BY d.last_heartbeat DESC
+    GROUP BY d.id, ha.manifest_id
+    ORDER BY CASE WHEN d.latency_ms IS NULL THEN 1 ELSE 0 END,
+             d.latency_ms ASC,
+             d.last_heartbeat DESC
     LIMIT 5
   `).all(...requestedExperts, cutoff);
 
@@ -630,6 +736,9 @@ function routeHandler(req, res) {
     device_id: device.id,
     endpoint: device.endpoint,
     country: device.country,
+    manifest_id: device.manifest_id,
+    identityVerified: true,
+    artifactVerification: 'signed_manifest_match_self_attested_runtime',
     experts: String(device.matched_experts)
       .split(',')
       .map(Number)
@@ -691,20 +800,12 @@ function csvCell(value) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-function secureTokenMatch(provided, expected) {
-  if (!provided || !expected) return false;
-  const providedBuffer = Buffer.from(provided);
-  const expectedBuffer = Buffer.from(expected);
-  return providedBuffer.length === expectedBuffer.length
-    && crypto.timingSafeEqual(providedBuffer, expectedBuffer);
-}
-
 function genesisExportHandler(req, res) {
   const configuredToken = process.env.ADMIN_EXPORT_TOKEN;
-  if (!configuredToken) {
+  if (!configuredToken || Buffer.byteLength(configuredToken) < 24) {
     return res.status(503).json({
       error: 'admin_export_not_configured',
-      message: 'Set ADMIN_EXPORT_TOKEN before enabling Genesis exports.',
+      message: 'Set ADMIN_EXPORT_TOKEN to a random secret of at least 24 bytes.',
     });
   }
 
@@ -742,8 +843,57 @@ function statsHandler(_req, res) {
   return res.json(networkStats());
 }
 
+const revokeHost = db.transaction((device, reason, now) => {
+  db.prepare(`
+    INSERT INTO host_revocations (device_id, public_key, reason, revoked_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(device_id) DO UPDATE SET reason = excluded.reason, revoked_at = excluded.revoked_at
+  `).run(device.id, device.public_key, reason, now);
+  db.prepare(`
+    UPDATE devices SET status = 'offline', endpoint = NULL, last_seen = ? WHERE id = ?
+  `).run(now, device.id);
+  db.prepare('DELETE FROM host_artifacts WHERE device_id = ?').run(device.id);
+  db.prepare('DELETE FROM device_experts WHERE device_id = ?').run(device.id);
+  db.prepare(`
+    UPDATE jobs
+    SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,
+        error = CASE WHEN attempts >= max_attempts THEN 'Assigned host was revoked.' ELSE error END,
+        lease_device_id = NULL, lease_token_hash = NULL, lease_expires_at = NULL,
+        updated_at = ?
+    WHERE status = 'leased' AND lease_device_id = ?
+  `).run(now, device.id);
+});
+
+function revokeHostHandler(req, res) {
+  const deviceId = req.params.deviceId;
+  if (!isValidDeviceId(deviceId)) {
+    return res.status(400).json({ error: 'invalid_device_id', message: 'A valid device ID is required.' });
+  }
+  const device = db.prepare('SELECT id, public_key FROM devices WHERE id = ?').get(deviceId);
+  if (!device) return res.status(404).json({ error: 'device_not_found', message: 'Host not found.' });
+  const reason = cleanText(req.body?.reason, 300);
+  if (!reason) {
+    return res.status(400).json({ error: 'reason_required', message: 'A bounded revocation reason is required.' });
+  }
+  const now = Date.now();
+  revokeHost(device, reason, now);
+  return res.json({
+    ok: true,
+    device_id: deviceId,
+    revoked_at: new Date(now).toISOString(),
+  });
+}
+
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'ii-coordinator', time: new Date().toISOString() });
+  res.json({
+    ok: true,
+    service: 'ii-coordinator',
+    version: '0.3.0',
+    signedHostsRequired: process.env.II_ALLOW_UNSIGNED_HOSTS !== 'true',
+    releaseTrustConfigured: Boolean(process.env.II_RELEASE_PUBLIC_KEY),
+    encryptedWorkConfigured: Boolean(parseEncryptionKey()),
+    time: new Date().toISOString(),
+  });
 });
 
 app.post(['/register', '/api/register'], registerRateLimit, registerHandler);
@@ -752,6 +902,14 @@ app.get(['/stats', '/api/stats'], statsHandler);
 app.get(['/route', '/api/route'], routeHandler);
 app.post(['/genesis', '/api/genesis'], genesisHandler);
 app.get('/admin/genesis', genesisExportHandler);
+app.post(
+  '/admin/hosts/:deviceId/revoke',
+  requireConfiguredBearer('II_ADMIN_API_TOKEN', 'admin_api_not_configured'),
+  revokeHostHandler,
+);
+installModelRoutes(app, db);
+installJobRoutes(app, db);
+installLearningRoutes(app, db);
 
 app.get(['/checkout/:plan', '/api/checkout/:plan'], async (req, res) => {
   const plan = req.params.plan;

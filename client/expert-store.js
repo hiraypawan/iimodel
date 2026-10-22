@@ -137,7 +137,11 @@ async function downloadExpert({
 
   const directory = expertsDirectory(homeDirectory);
   await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
-  const destination = path.join(directory, `expert-${expertId}${artifactExtension(parsedSource)}`);
+  const extension = artifactExtension(parsedSource);
+  const destination = expectedHash
+    ? path.join(directory, 'sha256', expectedHash.slice(0, 2), `${expectedHash}${extension}`)
+    : path.join(directory, `expert-${expertId}${extension}`);
+  await fsp.mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
   const partial = `${destination}.part`;
 
   try {
@@ -161,7 +165,6 @@ async function downloadExpert({
     }
   }
 
-  await fsp.rm(partial, { force: true });
   const timeoutMs = Number.parseInt(process.env.II_EXPERT_DOWNLOAD_TIMEOUT_MS || '1800000', 10);
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000) {
     throw new Error('II_EXPERT_DOWNLOAD_TIMEOUT_MS must be an integer of at least 1000.');
@@ -170,29 +173,74 @@ async function downloadExpert({
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   let handle;
+  let discardPartial = false;
   try {
-    const response = await fetch(parsedSource, { signal: controller.signal, redirect: 'follow' });
+    let resumeBytes = 0;
+    try {
+      const partialStats = await fsp.stat(partial);
+      resumeBytes = partialStats.isFile() ? partialStats.size : 0;
+      if (resumeBytes > maxBytes) {
+        await fsp.rm(partial, { force: true });
+        resumeBytes = 0;
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+
+    const fetchArtifact = (offset) => fetch(parsedSource, {
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: offset > 0 ? { Range: `bytes=${offset}-` } : {},
+    });
+    let response = await fetchArtifact(resumeBytes);
+    if (response.status === 416 && resumeBytes > 0) {
+      await fsp.rm(partial, { force: true });
+      resumeBytes = 0;
+      response = await fetchArtifact(0);
+    }
     if (!response.ok || !response.body) {
       throw new Error(`Expert download returned HTTP ${response.status}.`);
     }
+    if (resumeBytes > 0 && response.status !== 206) {
+      await fsp.rm(partial, { force: true });
+      resumeBytes = 0;
+    }
+    if (response.status === 206) {
+      const match = /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(response.headers.get('content-range') || '');
+      if (!match || Number(match[1]) !== resumeBytes) {
+        discardPartial = true;
+        throw new Error('Artifact server returned an invalid resume range.');
+      }
+    }
 
     const contentLength = Number(response.headers.get('content-length'));
-    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    const totalLength = Number.isFinite(contentLength) ? resumeBytes + contentLength : null;
+    if (totalLength !== null && totalLength > maxBytes) {
+      discardPartial = true;
       throw new Error(`Expert artifact exceeds the ${maxBytes}-byte download limit.`);
     }
 
-    handle = await fsp.open(partial, 'wx', 0o600);
+    handle = await fsp.open(partial, resumeBytes > 0 ? 'a' : 'w', 0o600);
     const hash = crypto.createHash('sha256');
-    let bytesWritten = 0;
+    if (resumeBytes > 0) {
+      await new Promise((resolve, reject) => {
+        const input = fs.createReadStream(partial, { start: 0, end: resumeBytes - 1 });
+        input.on('data', (chunk) => hash.update(chunk));
+        input.on('error', reject);
+        input.on('end', resolve);
+      });
+    }
+    let bytesWritten = resumeBytes;
     for await (const chunk of response.body) {
       const data = Buffer.from(chunk);
       bytesWritten += data.length;
       if (bytesWritten > maxBytes) {
+        discardPartial = true;
         throw new Error(`Expert artifact exceeds the ${maxBytes}-byte download limit.`);
       }
       hash.update(data);
       await handle.write(data);
-      onProgress({ bytesWritten, contentLength: Number.isFinite(contentLength) ? contentLength : null });
+      onProgress({ bytesWritten, contentLength: totalLength });
     }
     await handle.sync();
     await handle.close();
@@ -201,10 +249,17 @@ async function downloadExpert({
     if (bytesWritten === 0) throw new Error('Expert download returned an empty artifact.');
     const actualHash = hash.digest('hex');
     if (expectedHash && actualHash !== expectedHash) {
+      discardPartial = true;
       throw new Error(`Expert checksum mismatch: expected ${expectedHash}, received ${actualHash}.`);
     }
 
-    const validation = await validateArtifact(partial);
+    let validation;
+    try {
+      validation = await validateArtifact(partial);
+    } catch (error) {
+      discardPartial = true;
+      throw error;
+    }
     await fsp.rm(destination, { force: true });
     await fsp.rename(partial, destination);
     await fsp.chmod(destination, 0o600);
@@ -229,14 +284,14 @@ async function downloadExpert({
       ...validation,
     };
   } catch (error) {
+    if (discardPartial) await fsp.rm(partial, { force: true }).catch(() => {});
     if (error.name === 'AbortError') {
-      throw new Error(`Expert download exceeded ${Math.round(timeoutMs / 1000)} seconds.`);
+      throw new Error(`Expert download exceeded ${Math.round(timeoutMs / 1000)} seconds; partial data was kept for resume.`);
     }
     throw error;
   } finally {
     clearTimeout(timeout);
     if (handle) await handle.close().catch(() => {});
-    await fsp.rm(partial, { force: true }).catch(() => {});
   }
 }
 

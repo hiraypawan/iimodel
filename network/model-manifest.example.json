@@ -1,0 +1,22 @@
+{
+  "schema": "ii.model-manifest.v1",
+  "model_id": "ii/replace-with-reviewed-worker-model",
+  "version": "1.0.0",
+  "role": "worker",
+  "runtime": "node-llama-cpp@3.5.0",
+  "license": {
+    "id": "REPLACE-WITH-VERIFIED-SPDX-OR-LICENSE-ID",
+    "redistribution_confirmed": true,
+    "source_url": "https://replace-with-reviewed-model-card.example"
+  },
+  "created_at": "2026-10-22T00:00:00.000Z",
+  "artifacts": [
+    {
+      "id": "worker-q4",
+      "sha256": "replace-with-64-lowercase-hex-characters-before-signing",
+      "size_bytes": 1,
+      "format": "gguf",
+      "url": "https://replace-with-controlled-download.example/model.gguf"
+    }
+  ]
+}

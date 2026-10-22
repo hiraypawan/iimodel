@@ -63,10 +63,23 @@ test('migrates the PR #6 database without losing hosts or Genesis applications',
   process.env.II_DB_PATH = databasePath;
   const { db } = require('./server');
   const columns = db.prepare('PRAGMA table_info(devices)').all().map((column) => column.name);
-  for (const required of ['last_heartbeat', 'country', 'experts_start', 'experts_end']) {
+  for (const required of [
+    'last_heartbeat',
+    'country',
+    'experts_start',
+    'experts_end',
+    'public_key',
+    'last_signed_at',
+  ]) {
     assert.ok(columns.includes(required), `missing migrated column ${required}`);
   }
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM devices').get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM device_assignments').get().count, 13);
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM device_experts').get().count,
+    0,
+    'legacy declarations must not become verified hosted artifacts',
+  );
   assert.deepEqual(
     db.prepare('SELECT email, country FROM genesis').get(),
     { email: 'legacy@example.com', country: 'India' },

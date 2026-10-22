@@ -4,14 +4,18 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const crypto = require('node:crypto');
 const { downloadExpert, DEFAULT_MAX_EXPERT_BYTES } = require('./expert-store');
+const { loadOrCreateHostIdentity, signRequest } = require('./host-identity');
 const { LocalInferenceServer } = require('./inference-server');
+const { artifactClaim, fetchSignedManifest, selectArtifact } = require('./model-config');
+const { WorkerAgent } = require('./worker-agent');
 
-const CLIENT_VERSION = '0.2.0';
+const CLIENT_VERSION = '0.3.0';
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 10_000;
-const EXPERT_ID = Number.parseInt(process.env.II_EXPERT_ID || '0', 10);
+const CONFIGURED_EXPERT_ID = process.env.II_EXPERT_ID === undefined
+  ? null
+  : Number.parseInt(process.env.II_EXPERT_ID, 10);
 const INFERENCE_PORT = Number.parseInt(process.env.II_INFERENCE_PORT || '7777', 10);
 
 let mainWindow;
@@ -20,7 +24,10 @@ let heartbeatRunning = false;
 let isQuitting = false;
 let hostIdentity = null;
 let expertArtifact = null;
+let hostedArtifactClaim = null;
 let inferenceService = null;
+let workerAgent = null;
+let activeManifest = null;
 let coordinatorUrl = normalizeCoordinatorUrl(
   process.env.II_COORDINATOR_URL || 'http://localhost:8787',
 );
@@ -51,10 +58,6 @@ function stateDirectory() {
   return path.join(app.getPath('home'), '.ii');
 }
 
-function identityPath() {
-  return path.join(stateDirectory(), 'device.json');
-}
-
 function publishState(patch) {
   hostState = { ...hostState, ...patch };
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -63,64 +66,75 @@ function publishState(patch) {
   return hostState;
 }
 
-async function loadOrCreateIdentity() {
-  await fs.mkdir(stateDirectory(), { recursive: true, mode: 0o700 });
-
-  try {
-    const saved = JSON.parse(await fs.readFile(identityPath(), 'utf8'));
-    if (typeof saved.deviceId === 'string' && /^[a-zA-Z0-9._:-]{3,128}$/.test(saved.deviceId)) {
-      hostIdentity = saved;
-      return saved;
-    }
-  } catch (error) {
-    if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
-  }
-
-  hostIdentity = {
-    deviceId: `ii-${crypto.randomUUID()}`,
-    createdAt: new Date().toISOString(),
-  };
-  await fs.writeFile(identityPath(), `${JSON.stringify(hostIdentity, null, 2)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
-  return hostIdentity;
-}
-
 async function prepareExpertArtifact() {
-  const sourceUrl = process.env.II_EXPERT_SOURCE_URL;
-  if (!sourceUrl) {
-    throw new Error('II_EXPERT_SOURCE_URL is required before this device can host an expert.');
+  let sourceUrl;
+  let expectedSha256;
+  let expectedSize;
+  let expertId = CONFIGURED_EXPERT_ID ?? 0;
+  let artifactId = `legacy-expert-${expertId}`;
+
+  if (process.env.II_MODEL_MANIFEST_ID) {
+    activeManifest = await fetchSignedManifest({
+      coordinatorUrl,
+      manifestId: process.env.II_MODEL_MANIFEST_ID,
+      trustedPublicKey: process.env.II_RELEASE_PUBLIC_KEY,
+    });
+    const selected = selectArtifact(activeManifest, {
+      artifactId: process.env.II_ARTIFACT_ID,
+      expertId: CONFIGURED_EXPERT_ID,
+    });
+    sourceUrl = selected.url;
+    expectedSha256 = selected.sha256;
+    expectedSize = selected.size_bytes;
+    expertId = selected.expert_id ?? 0;
+    artifactId = selected.id;
+  } else {
+    if (process.env.II_ALLOW_LEGACY_ARTIFACT !== 'true') {
+      throw new Error('Set II_MODEL_MANIFEST_ID and II_RELEASE_PUBLIC_KEY; unsigned legacy artifacts are disabled.');
+    }
+    sourceUrl = process.env.II_EXPERT_SOURCE_URL;
+    expectedSha256 = process.env.II_EXPERT_SHA256;
+    if (!sourceUrl) throw new Error('II_EXPERT_SOURCE_URL is required in legacy artifact mode.');
   }
-  if (!Number.isInteger(EXPERT_ID) || EXPERT_ID < 0 || EXPERT_ID > 255) {
+
+  if (!Number.isInteger(expertId) || expertId < 0 || expertId > 255) {
     throw new Error('II_EXPERT_ID must be an integer from 0 to 255.');
   }
-
   const configuredMaxBytes = Number.parseInt(
     process.env.II_EXPERT_MAX_BYTES || String(DEFAULT_MAX_EXPERT_BYTES),
     10,
   );
-  return downloadExpert({
+  if (expectedSize && expectedSize > configuredMaxBytes) {
+    throw new Error(`Signed artifact is ${expectedSize} bytes, above II_EXPERT_MAX_BYTES.`);
+  }
+
+  const downloaded = await downloadExpert({
     homeDirectory: app.getPath('home'),
-    expertId: EXPERT_ID,
+    expertId,
     sourceUrl,
-    expectedSha256: process.env.II_EXPERT_SHA256,
+    expectedSha256,
     maxBytes: configuredMaxBytes,
     onProgress: ({ bytesWritten, contentLength }) => {
       const total = contentLength ? ` / ${Math.round(contentLength / (1024 * 1024))} MB` : '';
       publishState({
         phase: 'preparing',
-        message: `Downloading expert ${EXPERT_ID}: ${Math.round(bytesWritten / (1024 * 1024))} MB${total}`,
+        message: `Downloading ${artifactId}: ${Math.round(bytesWritten / (1024 * 1024))} MB${total}`,
         expertBytesDownloaded: bytesWritten,
       });
     },
   });
+  if (expectedSize && downloaded.sizeBytes !== expectedSize) {
+    await fs.rm(downloaded.path, { force: true });
+    throw new Error(`Artifact size mismatch: expected ${expectedSize}, received ${downloaded.sizeBytes}.`);
+  }
+  return { ...downloaded, artifactId, expertId };
 }
 
 async function loadInferenceRuntime(artifact) {
   if (!inferenceService?.server) throw new Error('Local inference service did not start.');
-  const modelPath = process.env.II_INFERENCE_MODEL_PATH
-    || (artifact.format === 'gguf' ? artifact.path : null);
+  const modelPath = activeManifest
+    ? (artifact.format === 'gguf' ? artifact.path : null)
+    : (process.env.II_INFERENCE_MODEL_PATH || (artifact.format === 'gguf' ? artifact.path : null));
   const loaded = await inferenceService.loadModel(modelPath);
   return {
     loaded,
@@ -148,7 +162,12 @@ function cleanPublicInferenceUrl(value) {
   return parsed.toString();
 }
 
-async function postJson(route, payload, timeoutMs = REQUEST_TIMEOUT_MS) {
+async function postHostJson(
+  route,
+  action,
+  payload,
+  { timeoutMs = REQUEST_TIMEOUT_MS, includePublicKey = false } = {},
+) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const startedAt = performance.now();
@@ -157,7 +176,7 @@ async function postJson(route, payload, timeoutMs = REQUEST_TIMEOUT_MS) {
     const response = await fetch(`${coordinatorUrl}${route}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(signRequest(hostIdentity, action, payload, { includePublicKey })),
       signal: controller.signal,
     });
     const elapsedMs = Math.round(performance.now() - startedAt);
@@ -182,15 +201,12 @@ async function sendHeartbeat(status = 'online') {
   heartbeatRunning = true;
 
   try {
-    const { data, elapsedMs } = await postJson('/heartbeat', {
-      device_id: hostIdentity.deviceId,
-      experts_start: hostIdentity.expertId,
-      experts_end: hostIdentity.expertId,
-      expert_size_bytes: hostIdentity.expertSizeBytes,
+    const { data, elapsedMs } = await postHostJson('/heartbeat', 'host:heartbeat', {
+      artifacts: hostedArtifactClaim ? [hostedArtifactClaim] : [],
       endpoint: hostIdentity.inferenceEndpoint,
       status,
       latency_ms: hostState.latencyMs ?? null,
-    }, status === 'offline' ? 2_000 : REQUEST_TIMEOUT_MS);
+    }, { timeoutMs: status === 'offline' ? 2_000 : REQUEST_TIMEOUT_MS });
 
     if (status === 'online') {
       publishState({
@@ -230,21 +246,21 @@ async function startHosting() {
   try {
     publishState({
       phase: 'preparing',
-      message: `Preparing expert ${EXPERT_ID}…`,
+      message: 'Preparing signed host identity and model artifact…',
       error: null,
     });
 
-    const [identity, artifact] = await Promise.all([
-      loadOrCreateIdentity(),
-      prepareExpertArtifact(),
-    ]);
+    const identity = await loadOrCreateHostIdentity(stateDirectory());
+    hostIdentity = identity;
+    const artifact = await prepareExpertArtifact();
     expertArtifact = artifact;
+    inferenceService.expertId = artifact.expertId;
     // Remove only the known PR #6 placeholder after a verified real artifact exists.
     await fs.rm(path.join(stateDirectory(), 'shard.bin'), { force: true });
 
     publishState({
       phase: 'preparing',
-      message: `Expert ${EXPERT_ID} verified. Checking inference runtime…`,
+      message: `${artifact.artifactId} verified. Checking inference runtime…`,
       expertPath: artifact.path,
       expertSizeBytes: artifact.sizeBytes,
       expertFormat: artifact.format,
@@ -259,49 +275,65 @@ async function startHosting() {
       inferenceError: runtime.error,
     });
 
-    const { data, elapsedMs } = await postJson('/register', {
-      device_id: identity.deviceId,
+    const manifestArtifact = activeManifest?.artifacts
+      .find((item) => item.id === artifact.artifactId);
+    hostedArtifactClaim = activeManifest && manifestArtifact
+      ? artifactClaim(activeManifest, manifestArtifact, runtime.loaded)
+      : null;
+
+    const { data, elapsedMs } = await postHostJson('/register', 'host:register', {
       deviceName: os.hostname(),
       platform: `${process.platform}-${process.arch}`,
       clientVersion: CLIENT_VERSION,
       country: process.env.II_HOST_COUNTRY,
-      endpoint: runtime.endpoint,
-      expert_size_bytes: artifact.sizeBytes,
+      endpoint: hostedArtifactClaim?.inference_ready ? runtime.endpoint : null,
+      artifacts: hostedArtifactClaim ? [hostedArtifactClaim] : [],
       memoryGb: Math.round((os.totalmem() / (1024 ** 3)) * 10) / 10,
-    });
+    }, { includePublicKey: true });
 
-    const metadata = {
+    hostIdentity = {
       ...identity,
       genesisNumber: data.genesisNumber,
       assignedExperts: data.experts,
-      expertId: EXPERT_ID,
+      expertId: artifact.expertId,
       expertPath: artifact.path,
       expertSha256: artifact.sha256,
       expertSizeBytes: artifact.sizeBytes,
-      inferenceEndpoint: runtime.endpoint,
+      inferenceEndpoint: hostedArtifactClaim?.inference_ready ? runtime.endpoint : null,
       inferenceLoaded: runtime.loaded,
       registeredAt: data.registeredAt,
       coordinatorUrl,
     };
-    hostIdentity = metadata;
-    await fs.writeFile(identityPath(), `${JSON.stringify(metadata, null, 2)}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
 
     await sendHeartbeat('online');
     beginHeartbeatLoop();
+    if (runtime.loaded && activeManifest?.role === 'worker') {
+      workerAgent = new WorkerAgent({
+        coordinatorUrl,
+        identity: hostIdentity,
+        inference: inferenceService,
+        onState: (state) => publishState({ ...state, active: true }),
+      });
+      workerAgent.start();
+    }
+    const roleLabel = activeManifest?.role === 'worker'
+      ? 'worker model'
+      : Number.isInteger(manifestArtifact?.expert_id)
+        ? `expert ${manifestArtifact.expert_id}`
+        : 'artifact';
     return publishState({
       phase: 'hosting',
       message: runtime.loaded
-        ? `Expert ${EXPERT_ID} loaded and serving real inference`
-        : `Expert ${EXPERT_ID} stored; inference is not loaded`,
+        ? `${roleLabel} verified, loaded, and ready for real jobs`
+        : `${roleLabel} verified and stored; executable inference is unavailable`,
       active: true,
       deviceId: data.deviceId,
+      identityVerified: data.identityVerified,
+      manifestId: activeManifest?.manifest_id || null,
       genesisNumber: data.genesisNumber,
       genesisMember: data.genesisMember,
-      experts: [EXPERT_ID],
-      expertsLabel: String(EXPERT_ID),
+      experts: Number.isInteger(manifestArtifact?.expert_id) ? [manifestArtifact.expert_id] : [],
+      expertsLabel: Number.isInteger(manifestArtifact?.expert_id) ? String(manifestArtifact.expert_id) : 'Worker',
       expertPath: artifact.path,
       expertSizeBytes: artifact.sizeBytes,
       expertFormat: artifact.format,
@@ -311,7 +343,7 @@ async function startHosting() {
       latencyMs: elapsedMs,
       lastHeartbeat: new Date().toISOString(),
       nextHeartbeatInMs: data.heartbeatIntervalMs,
-      error: runtime.loaded ? null : runtime.error,
+      error: null,
     });
   } catch (error) {
     return publishState({
@@ -334,11 +366,10 @@ function createWindow() {
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
-      // The renderer is a bundled local file with a strict CSP and external
-      // navigation disabled. A preload bridge can replace this for production.
-      nodeIntegration: true,
-      contextIsolation: false,
-      sandbox: false,
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
       devTools: process.env.NODE_ENV !== 'production',
     },
   });
@@ -373,7 +404,7 @@ app.whenReady().then(async () => {
   inferenceService = new LocalInferenceServer({
     host: '127.0.0.1',
     port: INFERENCE_PORT,
-    expertId: EXPERT_ID,
+    expertId: CONFIGURED_EXPERT_ID ?? 0,
   });
   try {
     await inferenceService.start();
@@ -395,6 +426,7 @@ app.on('before-quit', () => {
   if (isQuitting) return;
   isQuitting = true;
   clearInterval(heartbeatTimer);
+  workerAgent?.stop();
   if (hostState.active) void sendHeartbeat('offline');
   void inferenceService?.close();
 });

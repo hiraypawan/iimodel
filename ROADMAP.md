@@ -1,88 +1,139 @@
-# II v3.0 — Roadmap
+# II Product Roadmap
 
-This replaces the old `OPTIMIZATION_PLAN.md`. It records what is **done**,
-what is **next**, and what is **deliberately not planned** — with the same
-honesty rules as the rest of the project: nothing is marked done unless it is
-implemented *and* exercised by the test suite, and no future item is
-described as if it already worked.
+This roadmap governs the decentralized worker + local Jarvis product. Nothing is complete merely because it appears in a README or database; every phase has a physical or automated exit criterion.
 
----
+## v0.3 — Trusted background worker foundation (implemented)
 
-## Done (v3.0, "Pure II")
+- [x] Ed25519 host identity and signed mutable requests.
+- [x] Replay/clock-window checks.
+- [x] Publisher-signed model manifests.
+- [x] Exact manifest-backed host artifact claims.
+- [x] Separate desired assignments from hosted truth.
+- [x] Content-addressed artifact storage and HTTP resume.
+- [x] Complete-GGUF local inference or strict HTTP 503.
+- [x] Encrypted durable jobs with leases, retries, receipts, and cancellation.
+- [x] Pull workers that operate behind NAT.
+- [x] Explicit, encrypted, quarantined teaching intake with deletion.
+- [x] Sandboxed Electron renderer/preload boundary.
 
-- [x] **Repo consolidation** — package directories own the code; only
-      `main.py`, `app.py` and `bootstrap.py` remain at the root.
-- [x] **Scaffolding quarantine** — activation steering, linear probes,
-      TIES/DARE maths, KV paging, MobileCLIP and entropy-MCTS moved to
-      `archive/` with a README explaining each removal.
-- [x] **Logic-tree solver** — multi-hop decomposition, topological execution,
-      cited extraction, fail-closed statuses.
-- [x] **Exocortex** — disk-backed paged memory, opt-in profiling, visible and
-      deletable.
-- [x] **DAG planner** — parallel independent nodes, event log, fast path.
-- [x] **Interviewer** — explicit slot patterns, at most two questions, then
-      defaults.
-- [x] **Empathy module** — crisis-first, sourced techniques, mandatory
-      disclaimer.
-- [x] **Brainstorming engine** — mechanical SCAMPER recombination, two-tier
-      citations, `UNVALIDATED_COMBINATION` labelling.
-- [x] **Self-tool builder + critic loop** — strict template, Docker-only
-      execution, exact-traceback repair, Bandit scan, constraint checklist.
-- [x] **Hypothesis engine** — sandbox-tested toy simulations, `SIMULATED`
-      only, mandatory baseline and assumptions.
-- [x] **Router** — deterministic intent classification, crisis and fast
-      paths, DAG execution.
-- [x] **Caged renderer + hallucination detector** — strict prompt, entity
-      diff, reject → retry → raw-JSON fallback, logged rejections.
-- [x] **Benchmarks** — external ground truth, honesty, determinism,
-      fail-closed, concurrency, detector, interviewer, opt-in, banned claims,
-      RAM budget.
-- [x] **Safety** — `II_API_KEY` (401), `II_PRIVATE`, SSRF guard, Docker
-      sandbox mode, `--host` exposure warning, cross-platform launchers.
+Evidence: Node test suites exercise protocol tampering, migration, routing truth, encryption, job lifecycle, privacy rejection, physical file allocation/resume, and fail-closed inference.
 
----
+Limit: no production model or physical Electron GUI/model run was available in the build sandbox.
 
-## Next (ordered)
+## v0.4 — Production worker pilot
 
-1. **Live-source quality in the benchmarks.** The ground-truth set runs
-   against free search backends whose ranking changes. The next step is a
-   reviewed, versioned question set with per-question source allow-lists and
-   a periodic re-run job that reports *drift* instead of failing on it.
-2. **Conflict handling.** `CONFLICT` is detected for numeric disagreements.
-   Extending it to attribute-level conflicts (two sources giving different
-   founders, different dates) needs a typed comparison per slot.
-3. **Neural re-ranking in the Exocortex** — explicitly *not* done in v3.0.
-   The budget is ~45 MB RAM for an int8 MiniLM; it must ship with an offline
-   fallback and a visible size report.
-4. **Constraint checklist depth.** The critic loop currently checks that
-   specified slots appear in generated code. Slot-specific checks (a
-   "platform = web" constraint that implies an HTML artefact) would be more
-   useful.
-5. **Self-tool registry hygiene** — signing, review status and a rollback
-   path for generated tools.
-6. **DAG re-planning** — when a node fails, the planner currently reports the
-   failure. A bounded re-plan (retry the node with a different backend) would
-   improve the `PARTIAL` rate without weakening the fail-closed rule.
-7. **Measured memory profile on target hardware** — the RAM budget is
-   asserted with `getrusage` in the test suite; a published measurement on
-   the reference machine (model file, context length, backend) is still
-   missing.
+Build:
 
----
+- select one exact legally redistributable worker GGUF,
+- reproducible conversion/quantization record,
+- clean-machine installer,
+- remote readiness challenge jobs,
+- host key rotation/recovery and multi-coordinator revocation propagation,
+- queue/worker operational dashboard,
+- tested backup/restore,
+- signed update channel for the Electron client,
+- Dodo webhooks and subscription entitlements.
 
-## Deliberately not planned
+Exit criterion: ten physical desktops complete 1,000 controlled jobs with published latency, failure, retry, memory, and power measurements; one host failure is recovered without data corruption.
 
-* **Media and 3D orchestration** (FFmpeg video generation, Blender, React or
-  Node app scaffolding). Deferred to a future phase outside the 2 GB core.
-* **Neural embeddings in the memory index** (see above — budgeted, not
-  planned for this release).
-* **Model training, fine-tuning or weight modification.** II never trains a
-  model.
-* **Steering, probes, KV-cache transfer, TIES/DARE merging.** Archived; they
-  need an inference backend that exposes hidden states, logits or a forkable
-  KV cache, which the shipped backends do not.
-* **Vision grounding.** The archived prototype computes whole-image
-  similarity only; real localisation is a different project.
-* **Any capability score, hallucination percentage or efficiency claim.**
-  These need a published measurement protocol; until then the project
-  publishes none.
+## v0.5 — Offline phone reflex
+
+Build:
+
+- Android shell,
+- signed phone artifact updater,
+- offline wake word, VAD, STT, TTS,
+- benchmark-selected small local model,
+- deterministic local actions,
+- local/private/background routing,
+- charging, Wi-Fi, metered data, storage, and privacy settings.
+
+Exit criterion: named target Android devices complete the offline command suite with measured first-action/first-audio latency and screen-off/battery tests. Swarm outage cannot break local commands.
+
+## v0.6 — Peer-assisted weight distribution
+
+Build:
+
+- signed per-chunk map/Merkle root,
+- missing-chunk deduplication,
+- authenticated peer transfer,
+- peer discovery,
+- NAT traversal and relay fallback,
+- upload limits and consent,
+- malicious/corrupt peer penalties,
+- controlled HTTPS fallback.
+
+Exit criterion: two clients upgrade while fetching only missing chunks, reject a tampered peer chunk, resume interruption, and succeed behind representative Indian home/mobile NAT configurations.
+
+## v0.7 — Distributed-runtime research
+
+Build:
+
+- exact 1B–3B checkpoint and tensor topology,
+- one-device baseline,
+- two-desktop LAN runtime-supported split,
+- authenticated activation transport,
+- cancellation/backpressure,
+- failure recovery experiment,
+- complete published measurements.
+
+Exit criterion: a reproducible physical run executes one complete model across two devices and compares first-token latency, tokens/second, bytes/token, memory, and recovery with one-device inference.
+
+This phase does not become the voice path.
+
+## v0.8 — Reliable background swarm
+
+Build:
+
+- capability benchmarks,
+- placement by model/hardware/region/load,
+- replication targets from measured churn,
+- job-level hedging and loser cancellation,
+- worker reputation with decay,
+- duplicate/challenge result validation,
+- multi-coordinator durable storage/rate limits,
+- optional user-controlled cloud fallback.
+
+Exit criterion: sustained controlled jobs meet a published completion SLO through injected churn and coordinator restart.
+
+## v0.9 — Learning flywheel
+
+Build:
+
+- authorized review console,
+- stronger PII/secret scanning,
+- deduplication/provenance,
+- exact-base adapter training pipeline,
+- Hindi/Marathi/Hinglish and domain benchmark suites,
+- safety and privacy extraction gates,
+- signed candidate adapter registry,
+- staged rollout and rollback,
+- contributor consent withdrawal through derived-data policy.
+
+Exit criterion: one adapter improves a predeclared target with confidence, passes all non-regression/privacy gates, retains traceable consent, and is safely rolled back in rehearsal.
+
+No automatic user-adapter merge is planned before that evidence.
+
+## v1.0 — Public product gate
+
+Required:
+
+- Android local voice release,
+- stable background worker service,
+- production subscription entitlement system,
+- host/result abuse controls,
+- independent security review,
+- DPDP/privacy/legal documentation,
+- Genesis eligibility and reward terms,
+- incident and support operations,
+- measured product SLOs.
+
+A 20-device/full-MoE-copy claim additionally requires an exact tensor topology and successful complete forward pass across physical hosts. It is not a prerequisite for delivering useful background jobs through complete-model workers.
+
+## Decisions intentionally deferred
+
+- Exact Qwen/DeepSeek/other checkpoints until license and target-device benchmarks are reviewed.
+- Blockchain/token incentives until legal and Sybil concerns are solved.
+- Phone WAN hosting until local voice is stable and battery/network evidence exists.
+- Remote MoE execution until shared-backbone and per-layer expert protocol is proven.
+- Fully decentralized control until central protocol, revocation, billing, and abuse response are production-safe.

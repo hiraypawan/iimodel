@@ -19,6 +19,8 @@ models/
 *.zip
 *.tar
 *.tar.gz
+*release-key*.pem
+*.part
 
 # --- Python ---
 __pycache__/

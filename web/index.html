@@ -588,7 +588,7 @@
         <div>
           <div class="kicker">Decentralized intelligence · MVP live</div>
           <h1>The model lives <span>everywhere.</span></h1>
-          <p class="hero-copy">II is being built as a network, not a warehouse full of GPUs. Everyday computers host small expert shards. A lightweight router finds the right ones for every request.</p>
+          <p class="hero-copy">II is building a trusted background-AI worker network, not pretending random phones are one instant supercomputer. Signed desktop workers run complete compatible models today; the future phone reflex stays local and private.</p>
           <div class="actions">
             <a class="button button-primary" href="#genesis">Join Genesis 400 <span class="arrow">↗</span></a>
             <a class="button button-secondary" href="#network">See how it works <span class="arrow">↓</span></a>
@@ -610,7 +610,7 @@
             <span class="device-node n4">PC</span>
             <span class="device-node n5">PC</span>
             <span class="device-node n6">PC</span>
-            <div class="router-core"><div class="phone-screen"><strong>II</strong><span>Local router<br>Qwen3 4B</span></div></div>
+            <div class="router-core"><div class="phone-screen"><strong>II</strong><span>Local reflex<br>Model TBD</span></div></div>
           </div>
           <div class="live-card">
             <span class="live-label"><span class="live-dot" id="heroLiveDot"></span> Network now</span>
@@ -624,7 +624,7 @@
     <div class="stats" aria-label="Live network statistics">
       <div class="container stats-grid">
         <div class="stat"><span class="stat-value" id="onlineHosts">—</span><span class="stat-label">Hosts online</span></div>
-        <div class="stat"><span class="stat-value" id="expertCoverage">—</span><span class="stat-label">Expert coverage</span></div>
+        <div class="stat"><span class="stat-value" id="expertCoverage">—</span><span class="stat-label">Ready expert routes</span></div>
         <div class="stat"><span class="stat-value" id="hostedCapacity">—</span><span class="stat-label">Hosted capacity</span></div>
         <div class="stat"><span class="stat-value" id="genesisRemaining">—</span><span class="stat-label">Genesis places left</span></div>
       </div>
@@ -634,27 +634,27 @@
       <div class="container">
         <div class="section-head">
           <div class="section-kicker">How the network works</div>
-          <h2>One model.<br>Hundreds of machines.</h2>
-          <p class="section-description">Registration, liveness, and SQLite expert-map routing are live. The desktop now stores one verified artifact; full distributed inference and peer-to-peer transfer remain roadmap work.</p>
+          <h2>Local reflex.<br>Deep-work network.</h2>
+          <p class="section-description">Signed identity, trusted releases, encrypted background jobs, and complete-GGUF workers are live. Phone voice, peer transfer, and distributed tensor execution remain measured roadmap work.</p>
         </div>
         <div class="steps">
           <article class="step">
-            <span class="step-number">01 / HOST</span>
-            <div class="step-icon">20G</div>
-            <h3>A PC holds a shard</h3>
-            <p>The v0.2 desktop writes one verified expert artifact to real disk and checks in every 30 seconds. The production target is 13 experts and 20 GB per host.</p>
+            <span class="step-number">01 / VERIFY</span>
+            <div class="step-icon">SIG</div>
+            <h3>A PC verifies one release</h3>
+            <p>The v0.3 desktop verifies the publisher, exact SHA-256, byte size, and GGUF structure before it can claim readiness.</p>
           </article>
           <article class="step">
-            <span class="step-number">02 / ROUTE</span>
+            <span class="step-number">02 / LEASE</span>
             <div class="step-icon">⇄</div>
-            <h3>The phone picks experts</h3>
-            <p>A planned on-device Qwen3 Nano 4B router selects required experts and asks the coordinator for the best available peers.</p>
+            <h3>Background work finds a match</h3>
+            <p>The coordinator encrypts durable jobs and leases each one only to a signed live worker with the exact required manifest.</p>
           </article>
           <article class="step">
-            <span class="step-number">03 / MERGE</span>
-            <div class="step-icon">Σ</div>
-            <h3>Answers reunite</h3>
-            <p>Expert outputs will be fetched in parallel and merged on-device. Coordinator routes now use live SQLite mappings; weight transfer and merging are not implemented yet.</p>
+            <span class="step-number">03 / RESULT</span>
+            <div class="step-icon">✓</div>
+            <h3>Real output or safe retry</h3>
+            <p>A compatible GGUF returns real output. Failed or expired leases retry within a bound; an unloaded model never invents an answer.</p>
           </article>
         </div>
       </div>
@@ -663,19 +663,19 @@
     <section class="content architecture" id="architecture">
       <div class="container architecture-grid">
         <div class="sticky-copy">
-          <div class="section-kicker">Planned architecture</div>
-          <h2>A large model, split small.</h2>
-          <p class="section-description">The target design shards a 340 GB mixture-of-experts model across ordinary computers. These are architecture targets—not measured production performance.</p>
+          <div class="section-kicker">Truthful architecture</div>
+          <h2>Scale the work before the tensors.</h2>
+          <p class="section-description">Complete-model workers provide useful background throughput now. Expert IDs remain a research topology until an exact model graph runs across physical hosts.</p>
         </div>
         <div>
           <div class="spec-list">
-            <div class="spec"><span class="spec-value">671B</span><div class="spec-copy"><strong>Planned DeepSeek-V4-based MoE</strong><span>37B active parameters per token in the target architecture</span></div><span class="spec-status">Target</span></div>
-            <div class="spec"><span class="spec-value">256</span><div class="spec-copy"><strong>Total experts</strong><span>Planned MoE expert pool across the network</span></div><span class="spec-status">Target</span></div>
-            <div class="spec"><span class="spec-value">13</span><div class="spec-copy"><strong>Experts per host</strong><span>Approximately 17 GB of weights plus 3 GB runtime overhead</span></div><span class="spec-status">Target</span></div>
-            <div class="spec"><span class="spec-value">20</span><div class="spec-copy"><strong>Hosts per full copy</strong><span>ceil(256 experts ÷ 13 per host), including four redundant slots</span></div><span class="spec-status">Target</span></div>
-            <div class="spec"><span class="spec-value">30s</span><div class="spec-copy"><strong>Heartbeat cadence</strong><span>Coordinator excludes hosts after a 60-second live window</span></div><span class="spec-status">Live</span></div>
+            <div class="spec"><span class="spec-value">Ed25519</span><div class="spec-copy"><strong>Host and release trust</strong><span>Every mutable host claim and accepted model release is cryptographically bound</span></div><span class="spec-status">Live</span></div>
+            <div class="spec"><span class="spec-value">AES-256</span><div class="spec-copy"><strong>Durable work at rest</strong><span>Prompts, results, and consented corrections are encrypted in SQLite</span></div><span class="spec-status">Live</span></div>
+            <div class="spec"><span class="spec-value">GGUF</span><div class="spec-copy"><strong>Complete worker model</strong><span>node-llama-cpp executes only a compatible signed artifact; otherwise HTTP 503</span></div><span class="spec-status">Live</span></div>
+            <div class="spec"><span class="spec-value">256</span><div class="spec-copy"><strong>Expert IDs</strong><span>Placement and routing research—not yet an executable distributed model graph</span></div><span class="spec-status">Research</span></div>
+            <div class="spec"><span class="spec-value">30s</span><div class="spec-copy"><strong>Signed heartbeat cadence</strong><span>Coordinator excludes hosts after a 60-second live window</span></div><span class="spec-status">Live</span></div>
           </div>
-          <!-- TODO-REAL: Replace this browser demo with the Qwen3 MLC phone router. -->
+          <!-- The expert map is a research route; production background jobs use compatible complete workers. -->
           <div class="demo-console">
             <div class="console-top">
               <span class="console-title">Coordinator expert map · live</span>
@@ -762,7 +762,7 @@
               </select>
             </div>
           </div>
-          <label class="consent"><input name="acceptedHostTerms" type="checkbox" required><span>I understand the host downloads real expert data to <code>~/.ii/experts/</code> and that applying does not reserve a Genesis number.</span></label>
+          <label class="consent"><input name="acceptedHostTerms" type="checkbox" required><span>I understand the host downloads signed model data to <code>~/.ii/experts/</code>, may run background jobs only after a compatible model loads, and applying does not reserve a Genesis number.</span></label>
           <button class="button button-primary" type="submit" id="formSubmit">Apply for Genesis</button>
           <p class="form-message" id="formMessage" aria-live="polite"></p>
           <div class="fine-print">Genesis benefits and profit-pool participation require verification and are subject to the final published program terms. The $25 year-one figure is a target, not promised income or an investment return.</div>
@@ -774,7 +774,7 @@
   <footer class="site-footer">
     <div class="container footer-row">
       <a class="brand" href="#top"><span class="brand-mark">II</span><span>Internet Intelligence</span></a>
-      <span class="footer-copy">© 2026 II · MVP network · Built in India, routed everywhere.</span>
+      <span class="footer-copy">© 2026 II · v0.3 trusted worker network · Built in India.</span>
       <span class="footer-status"><span class="live-dot offline" id="footerLiveDot"></span><span id="coordinatorStatus">Checking coordinator</span></span>
     </div>
   </footer>

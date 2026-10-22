@@ -1,4 +1,8 @@
-# II v3.0 — Security notes
+# Historical local-engine security notes
+
+> These controls apply to the retained Python/BYOK engine. The decentralized
+> coordinator and Electron worker threat model is documented separately in
+> [`NETWORK-THREAT-MODEL.md`](./NETWORK-THREAT-MODEL.md).
 
 II is a **local research tool**. Run it on a trusted machine, bound to
 `127.0.0.1` (the default), and never expose it to untrusted clients or the
