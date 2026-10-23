@@ -20,7 +20,7 @@ async function createSafetensorsFixture(filePath) {
       shape: [TEN_MIB],
       data_offsets: [0, TEN_MIB],
     },
-    __metadata__: { purpose: 'II v0.3 download test; not inference weights' },
+    __metadata__: { purpose: 'II v0.4 download test; not inference weights' },
   };
   let headerJson = JSON.stringify(header);
   headerJson += ' '.repeat((8 - (Buffer.byteLength(headerJson) % 8)) % 8);
@@ -140,4 +140,48 @@ test('downloads a real 10 MiB expert artifact and keeps inference fail-closed', 
 
   assert.equal(await inference.loadModel(artifact.path), false);
   assert.match(inference.loadError, /GGUF model/);
+});
+
+test('creates and disposes an isolated llama context for every independent job', async () => {
+  const inference = new LocalInferenceServer();
+  let nextContext = 0;
+  const disposedContexts = [];
+  const disposedSessions = [];
+
+  inference.model = {
+    async createContext() {
+      const id = ++nextContext;
+      return {
+        getSequence: () => ({ id }),
+        async dispose() { disposedContexts.push(id); },
+      };
+    },
+    async dispose() {},
+  };
+  inference.ChatSessionClass = class FakeSession {
+    constructor({ contextSequence }) {
+      this.contextId = contextSequence.id;
+    }
+
+    async prompt(prompt, { maxTokens }) {
+      return `context-${this.contextId}:${prompt}:${maxTokens}`;
+    }
+
+    dispose() {
+      disposedSessions.push(this.contextId);
+    }
+  };
+  inference.modelPath = '/tmp/test.gguf';
+
+  const [first, second] = await Promise.all([
+    inference.infer('customer A secret', 10),
+    inference.infer('customer B request', 20),
+  ]);
+
+  assert.equal(first, 'context-1:customer A secret:10');
+  assert.equal(second, 'context-2:customer B request:20');
+  assert.deepEqual(disposedSessions, [1, 2]);
+  assert.deepEqual(disposedContexts, [1, 2]);
+  assert.equal(nextContext, 2);
+  await inference.disposeRuntime();
 });

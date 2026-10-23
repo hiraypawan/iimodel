@@ -1,6 +1,6 @@
 {
   "name": "ii-host-client",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Signed desktop worker for the II background AI network",
   "main": "main.js",

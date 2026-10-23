@@ -1,120 +1,143 @@
 # II — Internet Intelligence
 
-> A privacy-conscious worker network for background AI jobs, with a local-first Jarvis product as the destination.
+> A privacy-conscious background AI worker network with an installable local-first workspace.
 
-[![Coordinator](https://img.shields.io/badge/coordinator-v0.3-c8ff4d?labelColor=111315)](./network)
-[![Worker](https://img.shields.io/badge/desktop-signed%20worker-68e8dd?labelColor=111315)](./client)
-[![Inference](https://img.shields.io/badge/inference-fail--closed-ffcf66?labelColor=111315)](./client/inference-server.js)
+[![Coordinator](https://img.shields.io/badge/coordinator-v0.4-caff58?labelColor=111512)](./network)
+[![PWA](https://img.shields.io/badge/PWA-installable-70e7d9?labelColor=111512)](./web/app.html)
+[![Inference](https://img.shields.io/badge/inference-fail--closed-ffbd6b?labelColor=111512)](./client/inference-server.js)
 
 ## Executive truth
 
-II v0.3 implements a **cryptographically identified desktop-worker control plane**. It registers signed hosts, accepts only artifacts matching publisher-signed manifests, stores those artifacts as real content-addressed bytes, leases encrypted background jobs to compatible GGUF workers, retries failures, and never fabricates inference.
+II v0.4 is a **software-complete local reference and pilot control plane**. It has signed workers and releases, isolated per-job llama contexts, encrypted durable jobs, capability/load/declared-region scheduling, bounded delayed hedging, deterministic challenges, duplicate comparison, reputation/quarantine, an installable browser PWA, authenticated peer content transfer, a real two-process activation transport reference, a human-gated learning pipeline, and a durable identity/subscription/entitlement backend.
 
-It is **not yet** a complete phone Jarvis or a distributed 340 GB model. There is no Android/MLC voice app, DHT, WAN tensor pipeline, raw-safetensors expert runtime, automatic LoRA training, or production model bundled in this repository. Those require a reviewed redistributable checkpoint, physical devices, and runtime work documented below.
+It does **not** bundle or claim a production Qwen checkpoint. It does not prove physical-phone, physical-LAN, multi-NAT, GPU-training, live Dodo, app-store, legal, tax, or financial operation. The peer and activation suites run locally. Browser mobile does not provide a reliable always-on wake word, screen-off microphone, or screen-off local inference path. Those external gates remain explicit.
 
-## What changed in v0.3
+## What v0.4 implements
 
-- Ed25519 host identities; `device_id` is derived from the public key.
-- Signed registration, heartbeat, lease, completion, and failure requests with replay protection.
-- Publisher-signed `ii.model-manifest.v1` releases and a trusted release-key boundary.
-- Separate desired `device_assignments` from verified `host_artifacts`.
-- Coverage counts only live, signed, manifest-matching claims; routable coverage also requires a ready runtime and endpoint.
-- Content-addressed SHA-256 artifact paths with resumable HTTP range downloads.
-- Durable encrypted jobs, receipt tokens, leases, retries, cancellation, and worker results.
-- NAT-friendly pull workers: no inbound public port is required for background jobs.
-- Explicit opt-in teaching intake with encryption, direct-identifier/secret rejection, quarantine, status receipts, and deletion.
-- Hardened Electron renderer using a sandboxed preload bridge instead of renderer Node access.
+### Correctness and privacy
 
-## Product architecture
+- Every unrelated inference job creates a fresh llama context and chat session. Only immutable model weights stay loaded; session/KV state is disposed in `finally`.
+- Prompts, results, teachings, payment webhook payloads, push endpoints, and review notes are AES-256-GCM encrypted with record-specific authenticated context.
+- Receipt, lease, identity, checkout-correlation, and API tokens are stored only as hashes.
+- The contribution scanner covers direct identifiers, Indian IDs/phone/banking patterns, payment cards, private keys, JWTs, provider tokens, database URLs, password assignments, and high-entropy secrets.
+- User, token, plan, checkout, subscription, entitlement, usage, audit, fraud, Genesis qualification, and push-subscription data models are additive SQLite tables.
+
+### Reliable background jobs
+
+- Signed workers declare architecture, memory, GPU hints, concurrency, queue depth, runtime support, benchmark hints, country, and region. These are scheduling hints—not hardware attestation.
+- Scheduling checks manifest readiness, current load, declared-region preference, worker quarantine, and manifest-specific decayed score.
+- A delayed hedge can create at most **two** active attempts. The winner commits atomically; the coordinator marks the loser cancelled; the desktop agent polls attempt status and passes cancellation to the inference runtime.
+- `verification: "duplicate"` requires matching normalized output hashes from two different workers. A conflict fails the job and temporarily quarantines both for review.
+- Admin-created deterministic challenges commit only the expected output hash. Pass/fail updates a manifest-specific score; repeated failure quarantines the worker.
+- Manifest publication creates per-artifact replica targets (default two replicas across two declared regions); operators can override them and query live signed-artifact deficits.
+- Tests inject lease expiry, worker churn, result conflict, local transport interruption, corruption, and a coordinator `SIGKILL`/restart.
+
+### Universal PWA
+
+`web/app.html` is a standards-based PWA for Android Chrome, iOS Safari, and desktop browsers:
+
+- manifest, 192/512 maskable icons, standalone mode, service-worker offline shell;
+- PBKDF2-derived AES-256-GCM browser vault for conversations and job receipts;
+- no persisted passphrase or API bearer token;
+- foreground push-to-talk through the browser speech interface, with captured fallback audio discarded when no transcription adapter exists;
+- background job submission, encrypted receipt storage, visible status, completion notifications, service-worker push handling, and safe polling resumption;
+- WebGPU, storage, microphone, memory, notification, and local-adapter capability reporting;
+- `registerIILocalModelAdapter(adapter)` as a strict foreground adapter boundary—no adapter means local inference is unavailable, never simulated.
+
+The service worker caches only an explicit static shell allowlist. It never caches job, identity, billing, or other API responses.
+
+### Local peer content plane
+
+`p2p/` uses Node 20 built-ins and the existing Ed25519 protocol—no new npm dependency:
+
+- signed announcements and a bootstrap-signed peer directory;
+- content-addressed SHA-256 metadata and bounded HTTP byte ranges;
+- signed/replay-protected peer requests;
+- partial-file resume, final hash verification, corruption quarantine, concurrency and per-peer bandwidth limits;
+- authenticated relay and controlled HTTPS/loopback HTTP fallback;
+- JSONL reputation observations;
+- a test with **three independent peer processes**, an interrupted relayed transfer, replay rejection, oversize-range rejection, HTTP fallback, and corrupt-content rejection.
+
+This is a local reference. It is not evidence of STUN/TURN, public relay capacity, or representative Indian home/mobile NAT traversal.
+
+### Two-node activation reference
+
+`distributed/` starts two real worker processes and sends binary `Float32` activations over authenticated HTTP:
+
+- contiguous layer partitions, bounded frames, SHA-256 input/output verification, replay protection, timeouts, per-stage compute/transport measurements, and p50/p95 harness output;
+- deterministic nonlinear reference transforms so output can be compared exactly;
+- a worker-kill test that exposes the failed stage and bounded elapsed time.
+
+It is deliberately labelled `deterministic-nonlinear-v1`, `production_model: false`. A physical two-machine Qwen proof still requires an exact licensed checkpoint, tokenizer/topology hashes, compatible distributed runtime, two machines, and published baseline/LAN measurements.
+
+### Reviewed learning flywheel
+
+- encrypted quarantine plus stronger scanning;
+- audited plaintext review at `web/review.html`;
+- explicit approve/reject/needs-changes decisions and encrypted notes;
+- immutable dataset versions with consent/review provenance and content hashes;
+- external training-run requests and bounded environment/config metadata;
+- benchmark, privacy, artifact hash/size/HTTPS gates;
+- separate human approval followed by Ed25519-signed adapter publication;
+- staged rollout, rollback, and contributor withdrawal that disables affected releases;
+- honest limitation text when published weights cannot be selectively “untrained.”
+
+The coordinator orchestrates metadata and gates only. No GPU trainer is included or claimed.
+
+### Identity and business backend
+
+- passwordless identity challenge model with production delivery-webhook boundary and test-only token return behind `II_AUTH_TEST_MODE=true`;
+- scoped, expiring, revocable user tokens;
+- INR plan amounts in smallest units (`24900` = ₹249.00; `199900` = ₹1,999.00);
+- authenticated checkout correlation with Dodo metadata;
+- Standard Webhooks verification (`webhook-id`, timestamp, HMAC signature), replay window, encrypted/idempotent event storage;
+- activation, renewal, hold, past-due, pause, cancellation, expiry, refund, and chargeback transitions;
+- period quotas and atomic job/token usage accounting;
+- cryptographically verified Genesis-host qualification;
+- audit records and refund/dispute/correlation fraud flags.
+
+Pre-created Dodo URLs remain a fallback. Live provider validation still needs operator credentials and Dodo test/live webhook deliveries.
+
+## Architecture
 
 ```text
-Future phone reflex plane (not shipped)
-┌──────────────────────────────────────────────────────────────┐
-│ Wake word · local STT · small local model · local TTS       │
-│ Instant/private commands stay on the phone                   │
-└─────────────────────────────┬────────────────────────────────┘
-                              │ hard/background job
-                              ▼
-Current control plane
-┌──────────────────────────────────────────────────────────────┐
-│ Node.js 20 · Express 4.19 · SQLite                           │
-│ signed identity · signed releases · encrypted jobs · routing │
-└─────────────────────────────┬────────────────────────────────┘
-                              │ outbound lease polling
-                              ▼
-Current worker plane
-┌──────────────────────────────────────────────────────────────┐
-│ Electron 28 · node-llama-cpp · complete compatible GGUF      │
-│ verified artifact · real inference or honest HTTP 503        │
-└──────────────────────────────────────────────────────────────┘
+Installable browser workspace
+┌────────────────────────────────────────────────────────────┐
+│ offline shell · encrypted IndexedDB · foreground PTT       │
+│ local-adapter boundary OR authenticated background jobs     │
+└──────────────────────────────┬─────────────────────────────┘
+                               │ HTTPS JSON
+Coordinator                    ▼
+┌────────────────────────────────────────────────────────────┐
+│ Node 20 · Express 4.19 · better-sqlite3 · plain JavaScript │
+│ identity/billing · encrypted jobs · scheduler · review      │
+└─────────────┬──────────────────────────────┬───────────────┘
+              │ signed pull leases           │ signed metadata
+              ▼                              ▼
+Desktop worker                         Learning/business gates
+┌────────────────────────────┐         ┌──────────────────────┐
+│ Electron 28 · GGUF llama   │         │ human approval       │
+│ isolated context per job   │         │ external evidence    │
+│ real result or HTTP 503    │         │ signed publication   │
+└────────────────────────────┘         └──────────────────────┘
 
-Research plane (not shipped): runtime-supported LAN pipeline / remote MoE
-Distribution future: authenticated peer chunk transfer; HTTP works today
+Local references: authenticated peer chunk plane · two-process activation transport
+External gates: exact licensed weights · physical devices/LAN/NAT · GPU trainer · live Dodo
 ```
 
-The recommended product split is deliberate:
-
-- **Voice/reflex:** local phone execution; never depend on a multi-hop WAN pipeline.
-- **Deep work:** stable desktop workers for research, coding, and document jobs.
-- **Weight distribution:** signed, content-addressed artifacts; peer transfer later.
-- **Distributed tensors:** a measured research track, not a marketing claim.
-
-“One II” means one signed release/protocol bundle. Separate local and worker checkpoints are not Frankenstein inference because their layers are never stitched into one forward pass.
-
-## Corrected sharding status
-
-The original 256-expert, 13-assignment, 20-device math remains a **placement target**:
-
-| Target | Math |
-|---|---:|
-| Nominal routed expert IDs | 256 |
-| Desired assignments per desktop | 13 |
-| Desired devices per assignment cycle | `ceil(256 / 13) = 20` |
-| 400 placements | 20 target assignment groups |
-
-It is not proof of 20 executable model copies. A real MoE also contains shared attention, embeddings, normalization, routers, KV state, and experts associated with specific layers. Before claiming a full copy, II must publish an exact tensor topology and run one complete forward pass across physical hosts.
-
-The API therefore distinguishes:
-
-- `storedCoveredExperts`: signed manifest artifacts stored by live hosts.
-- `coveredExperts`: those claims also marked inference-ready with a routable endpoint.
-- `storedFullCopies`: complete stored ID coverage.
-- `fullCopies`: complete routable ID coverage.
-- `readyWorkers`: complete worker-model replicas ready for pull jobs.
-
-Runtime readiness is currently signed and manifest-matched but still self-attested; remote challenge execution is a future hardening step.
-
-## Security model
-
-### Hosts
-
-On first run, the worker creates an Ed25519 key at `~/.ii/device-key.pem` with mode `0600`. Its device ID is the SHA-256 fingerprint of the public key. Every mutable host claim is signed with a five-minute clock window and monotonically increasing timestamp.
-
-Unsigned hosting is disabled by default. `II_ALLOW_UNSIGNED_HOSTS=true` exists only for local migration and unsigned hosts never satisfy the normal production trust model.
-
-### Releases
-
-A release operator keeps an Ed25519 private release key offline. Coordinators and clients receive only `II_RELEASE_PUBLIC_KEY`. A manifest is rejected if its payload, artifact hash, publisher, or manifest ID changes.
-
-A valid signature proves publisher authorization—not model quality, safety, or legal rights. The manifest additionally requires the operator to confirm redistribution review.
-
-### Jobs and teachings
-
-Prompts, results, and accepted teaching text are AES-256-GCM encrypted in SQLite with `II_DATA_ENCRYPTION_KEY`. Submission tokens and receipt tokens are stored only as SHA-256 hashes. Logs do not print prompt or result text.
-
-The coordinator can decrypt work to lease it to a worker, and the worker sees plaintext while executing it. II does not yet provide confidential computing; users must assume the selected worker can inspect a remote prompt.
-
-See [the network threat model](./docs/NETWORK-THREAT-MODEL.md).
+The production path remains complete-model background replication. Expert-map rows are placement/routing facts, not proof that a distributed transformer graph exists. `/route` now requires explicit expert IDs; the old prompt-hash pseudo-router is gone.
 
 ## Repository layout
 
 ```text
-network/   Coordinator, manifests, encrypted jobs, teaching intake, Dodo
-client/    Signed Electron worker, artifact store, llama.cpp runtime
-protocol/  Dependency-free canonical signing and manifest protocol
-web/       Static landing page
-core/ ...  Earlier local research/tool engine retained in the repository
-archive/   Quarantined research experiments
+network/      Coordinator, reliability, accounts, Dodo, review/training gates
+client/       Signed Electron worker and isolated node-llama-cpp inference
+protocol/     Dependency-free canonical JSON, Ed25519, and manifests
+web/          Landing page, installable PWA, encrypted vault, review console
+p2p/          Signed local peer discovery/content/relay reference
+distributed/  Binary two-process activation transport and benchmark harness
+core/ …       Retained local Python research/tool engine
+archive/      Explicitly quarantined experiments
 ```
 
 ## Run the coordinator
@@ -123,7 +146,7 @@ Requirements: Node.js 20+, npm, and a random encryption key.
 
 ```bash
 cd network
-npm_config_nodedir=/usr/local npm ci   # nodedir is only needed where native headers are unavailable
+npm_config_nodedir=/usr/local npm ci
 
 export II_ADMIN_API_TOKEN="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
 export ADMIN_EXPORT_TOKEN="$(node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))")"
@@ -133,16 +156,22 @@ export II_DATA_ENCRYPTION_KEY="$(node -e "process.stdout.write(require('node:cry
 npm start
 ```
 
-The API and landing page default to `http://localhost:8787`.
+Open:
 
-## Publish a signed worker model
+- landing page: `http://localhost:8787/`
+- installable workspace: `http://localhost:8787/app.html`
+- learning review console: `http://localhost:8787/review.html`
 
-II does not commit model weights or choose an unreviewed production checkpoint for the operator.
+Production identity additionally needs `II_AUTH_DELIVERY_WEBHOOK_URL` and its token. Production billing needs Dodo API/product/webhook configuration. See [`network/.env.example`](./network/.env.example).
 
-1. Review the exact checkpoint license and commercial redistribution terms.
-2. Convert or obtain a `node-llama-cpp`-compatible GGUF.
-3. Host it over HTTPS.
-4. Compute its SHA-256 and exact byte size.
+## Publish and run a worker model
+
+II does not commit a checkpoint or choose an unreviewed model for the operator.
+
+1. Choose an exact benchmark-verified Qwen-family candidate.
+2. Review its license/model-card/commercial redistribution terms.
+3. Obtain or reproducibly convert a `node-llama-cpp`-compatible GGUF.
+4. Record SHA-256, exact byte size, tokenizer identity, quantization, and benchmark evidence.
 5. Generate an offline release key:
 
 ```bash
@@ -150,27 +179,14 @@ cd network
 npm run keygen:release -- ./release-key.pem
 ```
 
-6. Put the printed public key in coordinator and client `II_RELEASE_PUBLIC_KEY`.
-7. Copy and complete `network/model-manifest.example.json`.
-8. Sign it:
+6. Complete and sign `network/model-manifest.example.json`:
 
 ```bash
 II_RELEASE_PRIVATE_KEY_PATH=./release-key.pem \
   npm run sign:manifest -- model-manifest.json model-manifest.signed.json
 ```
 
-9. Publish it using the admin token:
-
-```bash
-curl -X POST http://localhost:8787/admin/models \
-  -H "Authorization: Bearer $II_ADMIN_API_TOKEN" \
-  -H "Content-Type: application/json" \
-  --data-binary @model-manifest.signed.json
-```
-
-10. Set the returned `manifest_id` as `II_MODEL_MANIFEST_ID` on workers. Keep `release-key.pem` offline and out of Git.
-
-## Run a desktop worker
+7. Publish with `POST /admin/models`, then configure the desktop worker:
 
 ```bash
 cd client
@@ -182,111 +198,83 @@ export II_ARTIFACT_ID=worker-q4
 npm start
 ```
 
-The worker:
+The worker verifies and resumes the real artifact under `~/.ii/experts/sha256/…`, loads compatible GGUF, reports signed capability/load hints, and polls outbound for work. Unavailable or unloaded inference returns HTTP 503 and does not lease work.
 
-1. verifies the signed release,
-2. resumes/downloads the exact content-addressed artifact,
-3. validates its hash and format,
-4. loads GGUF through `node-llama-cpp`,
-5. registers its signed identity and artifact claim,
-6. polls for compatible encrypted background jobs,
-7. returns real output or fails/requeues the job.
+## Submit reliable jobs
 
-If loading fails, `/infer` returns HTTP 503 `expert not loaded yet`, and the worker does not lease jobs.
-
-## Submit and read a background job
+A service token still works for operational clients:
 
 ```bash
-SUBMISSION=$(curl -sS -X POST http://localhost:8787/jobs \
+curl -X POST http://localhost:8787/api/jobs \
   -H "Authorization: Bearer $II_JOB_API_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"manifest_id":"MANIFEST_ID","prompt":"Research this topic","max_tokens":256}')
+  -d '{
+    "manifest_id":"MANIFEST_ID",
+    "prompt":"Research this topic",
+    "max_tokens":256,
+    "desired_region":"IN-WEST",
+    "hedge_after_ms":2000,
+    "verification":"duplicate"
+  }'
 ```
 
-The response contains a one-time `access_token`. Save it; only its hash is stored.
+A scoped user token also works and consumes current entitlements atomically. The response contains a one-time job receipt. Status uses that receipt at `GET /api/jobs/:id`.
+
+## Run local peer and activation references
+
+Peer configuration is documented in [`p2p/config.example.json`](./p2p/config.example.json). Start a configured process with:
 
 ```bash
-curl http://localhost:8787/jobs/JOB_ID \
-  -H "Authorization: Bearer JOB_ACCESS_TOKEN"
+node p2p/peer-process.js /path/to/peer-config.json
 ```
 
-Jobs are for background work. This endpoint is not a sub-second voice path.
+Two activation workers and the harness:
 
-## Teach II intake
+```bash
+export II_ACTIVATION_SECRET='<at least 24 random bytes>'
+HOST=0.0.0.0 PORT=7801 node distributed/activation-worker.js
+HOST=0.0.0.0 PORT=7802 node distributed/activation-worker.js
+II_ACTIVATION_NODES=http://127.0.0.1:7801,http://127.0.0.1:7802 \
+  node distributed/benchmark.js
+```
 
-`POST /teachings` is an intake and consent boundary—not automatic training. It requires:
-
-- the exact signed model manifest,
-- explicit consent version `2026-10-22`,
-- a prompt/correction pair,
-- no detected direct identifiers or common secrets,
-- `II_TEACHING_API_TOKEN`.
-
-Accepted text is encrypted and quarantined. The contributor receives a receipt token to inspect status or delete it. No code in v0.3 trains, merges, or publishes an adapter automatically.
-
-See [LEARNING-FLYWHEEL.md](./docs/LEARNING-FLYWHEEL.md).
-
-## API overview
-
-| Method | Route | Authentication | Purpose |
-|---|---|---|---|
-| `POST` | `/register` | Ed25519 host signature | Register identity and exact artifact claims |
-| `POST` | `/heartbeat` | Ed25519 host signature | Refresh signed live state |
-| `GET` | `/stats` | Public | Truthful stored/routable/worker counts |
-| `GET` | `/route?expert_ids=…` | Public | Find ready expert endpoints |
-| `GET` | `/models` | Public | List active signed releases |
-| `GET` | `/models/:id` | Public | Fetch one signed manifest |
-| `POST` | `/admin/models` | Admin bearer | Publish a trusted signed release |
-| `POST` | `/admin/hosts/:id/revoke` | Admin bearer | Revoke identity and requeue its lease |
-| `POST` | `/jobs` | Job API bearer | Submit encrypted background work |
-| `GET` | `/jobs/:id` | Job receipt bearer | Read status/result |
-| `POST` | `/jobs/:id/cancel` | Job receipt bearer | Cancel queued/leased work |
-| `POST` | `/worker/lease` | Ed25519 host signature | Lease compatible work |
-| `POST` | `/worker/jobs/:id/complete` | Host signature + lease token | Return real output |
-| `POST` | `/teachings` | Teaching API bearer | Submit consented correction to quarantine |
-| `DELETE` | `/teachings/:id` | Teaching receipt bearer | Withdraw and delete contribution |
-| `POST` | `/genesis` | Public | Apply for future host verification |
-| `GET` | `/admin/genesis` | Admin bearer | Export applications |
-
-## Payments
-
-Dodo checkout and `pricing_mode=by_country` provisioning remain available. Headline prices are `$20 / $10 / ₹249` plus tax. Production still requires provider credentials, signed webhook handling, subscription entitlements, cancellation/refund flows, and final Genesis legal terms. Checkout creation alone is not an entitlement system.
+That benchmark is a transport reference, not a Qwen result.
 
 ## Tests
 
 ```bash
-cd network && npm test
-cd client && npm test
+cd network && npm test && npm run check
+cd client && npm test && npm run check
 cd web && node --test index.test.js
+node --test p2p/p2p.test.js
+node --test distributed/distributed.test.js
 ```
 
-The suites cover signed/tamper-resistant host messages, trusted manifests, PR #6 migration, assignment math, truthful routing, encryption at rest, job lease/completion, teaching privacy rejection, real resumable 10 MiB allocation, strict inference 503 behavior, Electron worker logic, Dodo contracts, and landing behavior.
+The suites cover privacy/session isolation, signatures/replay, migration, encrypted records, scheduling, hedging/cancellation, duplicate conflicts, challenges/reputation, replica targets, churn/restart, learning gates, signed adapters, contributor withdrawal, identity/quotas, Dodo webhook idempotency/lifecycle, PWA boundaries, three-process peer transfer, resume/corruption/fallback, and two-process activation failure metrics.
 
-## Remaining product milestones
+## External gates still open
 
-- [ ] Select and legally review exact local-phone and worker checkpoints.
-- [ ] Ship Android wake word, offline STT/TTS, and benchmark-selected local model.
-- [ ] Implement local/private/background/cloud routing policy.
-- [ ] Add authenticated peer chunk transfer, NAT traversal, relays, and HTTP fallback.
-- [ ] Add remote readiness challenges and malicious-worker result verification.
-- [ ] Prove a two-desktop LAN pipeline with a runtime that really supports model splitting.
-- [ ] Define the exact MoE tensor topology before using 256/13/20 as executable capacity.
-- [ ] Build benchmark-gated adapter training with PII review, provenance, rollback, and human approval.
-- [ ] Add Dodo webhooks and durable subscription entitlements.
-- [ ] Publish Genesis eligibility, tax, profit-pool, and jurisdiction terms.
-- [ ] Move production coordination from one SQLite process to backed-up, horizontally safe infrastructure.
+- [ ] Exact licensed worker and local-device Qwen-family checkpoints selected from reproducible benchmarks.
+- [ ] Clean-machine Electron installers and native GUI/model smoke tests.
+- [ ] Physical Android Chrome, iOS Safari, Windows, and macOS install/capability matrix.
+- [ ] Native/offline always-on voice path if product requirements go beyond an open browser.
+- [ ] Physical two-machine LAN checkpoint execution with a compatible distributed runtime.
+- [ ] Representative NAT/relay tests and operated bootstrap/relay capacity.
+- [ ] Real GPU training, benchmark evidence, privacy evaluation, and approved adapter bytes.
+- [ ] Dodo sandbox/live deliveries, reconciliation, tax/accounting, incident response, and legal approval.
+- [ ] Genesis reward/profit-pool terms and fraud/legal review.
+- [ ] Multi-coordinator production database and disaster-recovery proof.
 
-See [ROADMAP.md](./ROADMAP.md) for dependency order and measurable exit criteria.
+## Non-negotiable rules
 
-## Non-negotiable product rules
-
-1. Never claim an assigned ID is an executable expert.
+1. Never claim a stored expert ID is an executable transformer graph.
 2. Never return fabricated inference.
-3. Never use a WAN multi-host pipeline for the instant voice reflex path.
-4. Never load an unsigned or hash-mismatched release.
-5. Never auto-train on private chats or auto-merge community adapters.
-6. Never describe theoretical storage division as measured compute capacity.
+3. Never market local process tests as physical LAN, phone, NAT, GPU, or payment proof.
+4. Never load unsigned or hash-mismatched artifacts.
+5. Never reuse unrelated customer KV/chat state.
+6. Never silently train on chats or auto-merge community adapters.
+7. Never put the instant voice reflex behind a random WAN pipeline.
 
 ## License
 
-See [LICENSE](./LICENSE). Model checkpoints and user-contributed data have their own licenses and consent requirements; the repository license does not grant rights to redistribute arbitrary weights.
+See [LICENSE](./LICENSE). Model checkpoints, payment operation, and user-contributed data have separate rights and obligations; this repository license does not grant permission to redistribute arbitrary weights or training data.

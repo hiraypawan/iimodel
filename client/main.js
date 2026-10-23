@@ -10,7 +10,7 @@ const { LocalInferenceServer } = require('./inference-server');
 const { artifactClaim, fetchSignedManifest, selectArtifact } = require('./model-config');
 const { WorkerAgent } = require('./worker-agent');
 
-const CLIENT_VERSION = '0.3.0';
+const CLIENT_VERSION = '0.4.0';
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const CONFIGURED_EXPERT_ID = process.env.II_EXPERT_ID === undefined
@@ -56,6 +56,22 @@ function normalizeCoordinatorUrl(value) {
 
 function stateDirectory() {
   return path.join(app.getPath('home'), '.ii');
+}
+
+function workerCapabilities() {
+  return {
+    region: process.env.II_HOST_REGION || process.env.II_HOST_COUNTRY || null,
+    architecture: `${process.platform}-${process.arch}`,
+    cpu_cores: Math.max(1, os.cpus()?.length || 1),
+    memory_mb: Math.round(os.totalmem() / (1024 ** 2)),
+    gpu_backend: process.env.II_GPU_BACKEND || 'none',
+    gpu_name: process.env.II_GPU_NAME || null,
+    vram_mb: Number.parseInt(process.env.II_GPU_VRAM_MB || '0', 10) || 0,
+    max_concurrency: 1,
+    queue_depth: workerAgent?.running ? 1 : 0,
+    supported_runtimes: activeManifest?.runtime ? [activeManifest.runtime] : [],
+    benchmark: hostState.workerBenchmark || null,
+  };
 }
 
 function publishState(patch) {
@@ -206,6 +222,7 @@ async function sendHeartbeat(status = 'online') {
       endpoint: hostIdentity.inferenceEndpoint,
       status,
       latency_ms: hostState.latencyMs ?? null,
+      capabilities: workerCapabilities(),
     }, { timeoutMs: status === 'offline' ? 2_000 : REQUEST_TIMEOUT_MS });
 
     if (status === 'online') {
@@ -289,6 +306,7 @@ async function startHosting() {
       endpoint: hostedArtifactClaim?.inference_ready ? runtime.endpoint : null,
       artifacts: hostedArtifactClaim ? [hostedArtifactClaim] : [],
       memoryGb: Math.round((os.totalmem() / (1024 ** 3)) * 10) / 10,
+      capabilities: workerCapabilities(),
     }, { includePublicKey: true });
 
     hostIdentity = {
@@ -312,6 +330,7 @@ async function startHosting() {
         coordinatorUrl,
         identity: hostIdentity,
         inference: inferenceService,
+        capabilities: workerCapabilities,
         onState: (state) => publishState({ ...state, active: true }),
       });
       workerAgent.start();

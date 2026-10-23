@@ -1,34 +1,85 @@
-# II Network API v0.3
+# II Network API v0.4
 
-All JSON mutation requests use `Content-Type: application/json`. Error responses have `{error, message}`. Public `/api/...` aliases exist for browser-facing routes where shown in code.
+JSON mutations use `Content-Type: application/json`. Errors use `{ "error": "code", "message": "…" }` where a safe message is available. Browser-facing aliases generally live under `/api`; exact route arrays are the source of truth.
 
-## Host authentication
+## Authentication classes
 
-Host requests include:
+### Signed host
+
+Mutable host/worker requests include:
 
 ```json
 {
-  "device_id": "ii-<public-key fingerprint>",
+  "device_id": "ii-<Ed25519 SPKI SHA-256 prefix>",
   "signed_at": 1792680000000,
   "signature": "base64 Ed25519 signature"
 }
 ```
 
-Registration also includes `public_key`. See `protocol/crypto.js` for canonical signing. Do not implement signing with ordinary `JSON.stringify` order.
+Registration also includes `public_key`. Sign canonical payloads through `protocol/crypto.js`; ordinary property-order `JSON.stringify` is not the protocol. Signatures bind an action such as `host:heartbeat` or `worker:complete`. Timestamps have a five-minute window and must increase per device.
 
-## `POST /register`
+### Service/admin/user bearer
 
-Action: `host:register`. Rate limit: 10/minute/IP.
+- `II_ADMIN_API_TOKEN`: release, review, reliability, business, fraud, and Genesis administration.
+- `II_JOB_API_TOKEN`: service-to-service job submission.
+- `II_TEACHING_API_TOKEN`: consented teaching intake.
+- user tokens: hashed, scoped, expiring, and revocable; a `jobs:submit` token may submit against active quota.
+- receipt/lease tokens: one-record capability tokens stored only as hashes.
 
-Optional operational fields: `deviceName`, `platform`, `clientVersion`, `country`, `memoryGb`, `latencyMs`, `endpoint`. `artifacts` is the complete current claim set; every claim must match an active manifest. An endpoint requires at least one ready claim.
+## Identity
 
-Response includes desired placement under `experts`/`experts_start`/`experts_end`. These are assignments, not verified hosted state.
+### `POST /api/auth/request-link`
 
-## `POST /heartbeat`
+Body: `{ "email": "person@example.com" }`.
 
-Action: `host:heartbeat`. Sends status, endpoint, latency, and complete current `artifacts`. Omitted claims are removed. A host cannot select arbitrary expert ranges through heartbeat.
+Production requires `II_AUTH_DELIVERY_WEBHOOK_URL` and `II_AUTH_DELIVERY_WEBHOOK_TOKEN`. Login tokens are sent to that delivery adapter and not returned. `II_AUTH_TEST_MODE=true` returns `test_only_token` solely for automated/local tests.
 
-## Artifacts
+### `POST /api/auth/verify`
+
+Body: `{ "challenge_id": "identity_…", "token": "…" }`. Consumes the one-time challenge, verifies/creates the user, grants a bounded free period, and returns a scoped access token once.
+
+### User routes
+
+- `GET /api/me` — profile, subscription metadata, current entitlements, Genesis qualification.
+- `POST /api/tokens` — issue a token with a subset of current scopes.
+- `DELETE /api/tokens/:id` — revoke one owned token.
+- `POST /api/push-subscriptions` — store HTTPS endpoint/keys encrypted; requires a configured external sender for actual push delivery.
+- `GET /api/plans` — public plan amounts; amounts are smallest currency units.
+
+## Hosts and capabilities
+
+### `POST /register`
+
+Action `host:register`; limited to 10 registrations/IP/minute. Optional operational fields include name, platform, client version, country, memory, endpoint, and signed `capabilities`:
+
+```json
+{
+  "region": "IN-WEST",
+  "architecture": "win32-x64",
+  "cpu_cores": 8,
+  "memory_mb": 16384,
+  "gpu_backend": "cuda",
+  "gpu_name": "operator-declared name",
+  "vram_mb": 8192,
+  "max_concurrency": 1,
+  "queue_depth": 0,
+  "supported_runtimes": ["node-llama-cpp@3.5.0"],
+  "benchmark": {
+    "tokens_per_second": 12.4,
+    "time_to_first_token_ms": 750,
+    "sample_count": 5,
+    "manifest_id": "64 hex"
+  }
+}
+```
+
+These fields are self-declared hints—not remote attestation. `artifacts` is the complete current manifest-backed claim set. A public endpoint requires a ready claim.
+
+### `POST /heartbeat`
+
+Action `host:heartbeat`. Refreshes status, endpoint, latency, capabilities/load, and the complete artifact claim set. Omitted claims are removed.
+
+### Artifact claim
 
 ```json
 {
@@ -41,86 +92,156 @@ Action: `host:heartbeat`. Sends status, endpoint, latency, and complete current 
 }
 ```
 
-Expert manifests additionally require the exact signed `expert_id`.
+Expert-role artifacts also require the exact signed `expert_id`.
 
-## Models
+## Signed model releases
 
 - `GET /models?role=worker`
 - `GET /models/:manifestId`
-- `POST /admin/models` — `II_ADMIN_API_TOKEN`
-- `POST /admin/models/:manifestId/deactivate` — `II_ADMIN_API_TOKEN`
-- `POST /admin/hosts/:deviceId/revoke` — `II_ADMIN_API_TOKEN`; requires JSON `reason`
+- `POST /admin/models`
+- `POST /admin/models/:manifestId/deactivate`
+- `POST /admin/hosts/:deviceId/revoke` with bounded `reason`
 
-Deactivation prevents new routing/leasing and fails pending work for that release.
+Deactivation blocks routing/leasing and fails pending work for that release. A valid signature proves publisher authorization, not model quality/license safety.
 
-## Jobs
+## Jobs and reliability
 
-### Submit
+### Submit `POST /jobs` or `/api/jobs`
 
-`POST /jobs`, bearer `II_JOB_API_TOKEN`:
+Authentication: service job token or scoped user token.
 
 ```json
 {
   "manifest_id": "active worker manifest",
   "prompt": "background task",
   "max_tokens": 256,
-  "max_attempts": 3
+  "max_attempts": 3,
+  "desired_region": "IN-WEST",
+  "hedge_after_ms": 2000,
+  "verification": "duplicate"
 }
 ```
 
-Returns HTTP 202 with job ID and one-time access token.
+`verification` is omitted for first-valid-result behavior. `duplicate` requires two matching normalized SHA-256 outputs from distinct workers. Hedging delay is 250–60,000 ms; no job has more than two parallel attempts. User submissions atomically consume active job/token entitlements.
 
-### Status/cancel
+Returns HTTP 202 with a one-time job receipt.
 
-- `GET /jobs/:id` — bearer receipt token.
-- `POST /jobs/:id/cancel` — bearer receipt token.
+### Receipt routes
 
-### Worker lease
+- `GET /jobs/:id` — status, result, comparison state, and aggregate attempt counts.
+- `POST /jobs/:id/cancel` — marks every active attempt cancelled.
 
-`POST /worker/lease`, action `worker:lease`. Returns HTTP 204 when no compatible job exists, otherwise plaintext prompt plus a one-time lease token. The host must have a live, ready claim for the exact manifest.
+### Lease `POST /worker/lease`
 
-### Complete/fail
-
-- `POST /worker/jobs/:id/complete`, action `worker:complete`.
-- `POST /worker/jobs/:id/fail`, action `worker:fail`.
-
-Both include `lease_token`. Completion includes `output` and optional bounded metrics. Failure includes a bounded error. Expired or wrong-worker leases are rejected.
-
-## Teachings
-
-### Submit
-
-`POST /teachings`, bearer `II_TEACHING_API_TOKEN`:
+Action `worker:lease`. Signed capabilities can refresh lease-time load. Returns 204 or:
 
 ```json
 {
-  "manifest_id": "exact active release",
-  "prompt": "previous input",
-  "correction": "user-approved better response",
-  "language": "mr-IN",
-  "category": "education",
-  "consent": true,
-  "consent_version": "2026-10-22"
+  "job": {
+    "id": "job_…",
+    "attempt_id": "attempt_…",
+    "is_hedge": false,
+    "kind": "inference",
+    "manifest_id": "…",
+    "prompt": "plaintext visible to selected worker",
+    "max_tokens": 256,
+    "lease_token": "one-time secret",
+    "lease_expires_at": "ISO date"
+  }
 }
 ```
 
-Sensitive-pattern findings return HTTP 422 and are not stored. Accepted intake returns a receipt and remains quarantined.
+Selection requires exact ready artifact, capacity, no quarantine, and honours declared-region preference when a matching live worker has capacity. Scores are manifest-specific and decay toward neutral.
 
-- `GET /teachings/:id` — receipt token; metadata only.
-- `DELETE /teachings/:id` — receipt token; permanent row deletion.
-- `GET /admin/teachings` — admin bearer; metadata only, never content.
+### Attempt cancellation/status
 
-## Public stats/routing
+`POST /worker/attempts/:id/status`, action `worker:attempt-status`, with attempt and lease token. The desktop agent polls this during generation and aborts when the coordinator cancels a losing hedge.
 
-- `GET /stats` reports signed/manifest-backed state and job counts.
-- `GET /route?expert_ids=0,1` returns direct expert endpoints only when live and ready.
+### Complete/fail
 
-Prompt-hash expert selection remains a research placeholder. Production background work uses `/jobs`, not `/route`.
+- `POST /worker/jobs/:id/complete`, action `worker:complete`;
+- `POST /worker/jobs/:id/fail`, action `worker:fail`.
 
-## Genesis and checkout
+Include `attempt_id` and `lease_token`. Completion includes bounded output and an allowlisted numeric metrics object. Arbitrary metric keys are discarded to avoid accidental secret/PII persistence.
 
-- `POST /genesis`
-- `GET /admin/genesis` — admin bearer CSV.
-- `GET /api/checkout/monthly|yearly`
+### Challenges/reputation/replicas
 
-Checkout redirects do not by themselves create subscription entitlements.
+- `POST /admin/challenges` — prompt, expected output, active manifest; only expected normalized SHA-256 is retained.
+- `GET /admin/reliability/workers` — score/counters/quarantine and capability hints.
+- `POST /admin/reliability/workers/:device/:manifest/release` — clear reviewed quarantine.
+- `GET /admin/reliability/conflicts` — output hashes and worker IDs, not plaintext.
+- `PUT /admin/reliability/replicas/:manifest/:artifact` — target replicas/regions.
+- `GET /reliability/replicas` — live deficits from signed artifact claims and declared regions.
+
+## Public routing/stats
+
+- `GET /stats` — signed/manifest-backed host, storage, ready-worker, job, and Genesis counts.
+- `GET /route?expert_ids=0,1` — explicit expert IDs only; live ready SQLite claims.
+
+There is no prompt-hash pseudo-router. Expert maps still do not prove a distributed model graph.
+
+## Teaching, review, datasets, and adapters
+
+### Contributor
+
+- `POST /teachings` — teaching token, exact manifest, bounded prompt/correction, category/language, explicit consent/version.
+- `GET /teachings/:id` — receipt; metadata only.
+- `DELETE /teachings/:id` — receipt; tombstones encrypted content, records affected derivations, and withdraws affected staged/active releases.
+
+Privacy findings return 422 and content is not stored.
+
+### Review and dataset admin
+
+- `GET /admin/teachings` — metadata only.
+- `GET /admin/teachings/:id/content` — audited decrypted view.
+- `POST /admin/teachings/:id/review` — `approved`, `rejected`, or `needs_changes` plus reviewer/notes.
+- `POST /admin/datasets` — approved IDs from one exact manifest.
+- `POST /admin/datasets/:id/seal` — immutable item/provenance hash.
+- `GET /admin/datasets`
+
+### External training and publication
+
+- `POST /admin/training-runs` — sealed dataset and bounded secret-scanned metadata.
+- `POST /admin/training-runs/:id/report` — external status/evidence.
+- `POST /admin/training-runs/:id/approve` — separate human gate.
+- `POST /admin/training-runs/:id/publish` — canonical Ed25519 adapter release; requires `II_ADAPTER_SIGNING_PRIVATE_KEY`.
+- `GET /admin/training-runs`
+- `POST /admin/adapters/:id/rollout`
+- `POST /admin/adapters/:id/rollback`
+
+No route runs a GPU trainer.
+
+## Dodo billing and entitlements
+
+### Checkout
+
+- `GET /api/checkout/monthly|yearly` — anonymous redirect/legacy link path.
+- `POST /api/billing/checkout` — authenticated and correlated; body `{ "plan": "monthly" }`.
+- `GET /api/billing/status` — owned checkout/subscription metadata.
+
+Authenticated API-created checkouts include opaque local checkout/user/correlation metadata. Pre-created URLs remain a fallback but must be configured to return equivalent metadata before entitlement automation can correlate them.
+
+### `POST /webhooks/dodo`
+
+Requires `DODO_PAYMENTS_WEBHOOK_KEY` and Standard Webhooks headers:
+
+```text
+webhook-id
+webhook-timestamp
+webhook-signature: v1,<base64 HMAC-SHA256>
+```
+
+The signature covers the exact raw body and must be within five minutes. Each event ID/payload hash is idempotently stored; payloads are encrypted. Reusing an event ID with another body raises a critical fraud flag.
+
+Handled lifecycle includes active/renewed/hold/past-due/paused/unpaused/cancelled/failed/expired, refund success, and dispute/chargeback states. Active/renewed events grant period entitlements; adverse terminal states suspend/expire them.
+
+- `GET /admin/billing/events` — metadata/audit/fraud flags, no plaintext payload.
+- `POST /admin/billing/fraud/:id/resolve`
+
+## Genesis
+
+- `POST /genesis` — public host-interest intake.
+- `GET /admin/genesis` — protected CSV export.
+- `POST /admin/genesis/qualify` — links a real user to a cryptographically verified first-400 artifact host.
+
+A signup or desired assignment alone never qualifies.

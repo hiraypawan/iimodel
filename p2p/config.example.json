@@ -1,0 +1,19 @@
+{
+  "stateDirectory": "/home/user/.ii/p2p",
+  "host": "0.0.0.0",
+  "port": 7790,
+  "endpoint": "https://peer.example.com",
+  "bootstraps": [
+    {
+      "url": "https://bootstrap.example.com",
+      "publicKey": "BASE64_ED25519_SPKI_FROM_BOOTSTRAP_OPERATOR"
+    }
+  ],
+  "relayUrl": "https://relay.example.com",
+  "maxArtifactBytes": 34359738368,
+  "maxChunkBytes": 1048576,
+  "maxConcurrentTransfers": 4,
+  "maxBytesPerPeerMinute": 67108864,
+  "reputationFile": "/home/user/.ii/p2p/reputation.jsonl",
+  "seedFiles": []
+}

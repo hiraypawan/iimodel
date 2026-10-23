@@ -1,0 +1,42 @@
+{
+  "id": "/app.html",
+  "name": "II Private AI Workspace",
+  "short_name": "II",
+  "description": "Encrypted local conversations, foreground local-model adapters, and verified background AI jobs.",
+  "start_url": "/app.html",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "background_color": "#090b0a",
+  "theme_color": "#0a0c0b",
+  "orientation": "any",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New private chat",
+      "short_name": "New chat",
+      "url": "/app.html?action=new",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Background jobs",
+      "short_name": "Jobs",
+      "url": "/app.html#jobs",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

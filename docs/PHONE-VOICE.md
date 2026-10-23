@@ -1,108 +1,123 @@
-# Phone Voice / Jarvis Plan
+# Browser Mobile, Voice, and Local Models
 
-Status: specification only. No Android or iOS client is shipped in this repository.
+## Current status
+
+v0.4 ships an installable standards-based PWA at `web/app.html` for Android Chrome, iOS Safari, and desktop browsers. It includes:
+
+- a service-worker offline shell;
+- PBKDF2/AES-256-GCM encrypted local conversations and job receipts;
+- a non-persisted passphrase and session-only API token;
+- push-to-talk while the page/PWA is open;
+- background-job submission, status UI, and completion notifications;
+- WebGPU, storage, microphone, memory, and notification capability reporting;
+- a strict `registerIILocalModelAdapter(adapter)` foreground adapter boundary.
+
+No local model adapter or phone checkpoint is bundled. If no adapter is registered, local inference is shown as unavailable and no answer is fabricated.
+
+## Browser limits
+
+A browser PWA is not a reliable replacement for a native always-on assistant:
+
+- microphone capture can stop when the app is backgrounded or the screen locks;
+- iOS/Android can suspend JavaScript, timers, service workers, and WebGPU work;
+- the Web Speech recognition implementation may be absent or provider-backed rather than offline;
+- background sync and push availability varies by OS/browser/install state;
+- storage can be evicted unless persistence is granted;
+- WebGPU availability does not prove enough RAM, model compatibility, thermal stability, or sustained performance.
+
+Accordingly, II claims **push-to-talk while open**, not an always-on wake word, screen-off listening, or screen-off local inference.
 
 ## Product rule
 
-The instant voice path is local. A random multi-host internet pipeline must never be required to recognize the wake word, stop speech, set a timer, or begin a response.
+The instant reflex path must be local. A random multi-host internet pipeline must never be required to recognize a wake word, stop speech, set a timer, or begin a response.
 
-## Target request classes
-
-| Class | Default execution | Example |
+| Request class | Default execution | Current software |
 |---|---|---|
-| Reflex | Phone deterministic/local | stop, continue, timer |
-| Private local | Phone model | summarize a local note |
-| Interactive hard | Best stable complete worker or optional cloud | coding question |
-| Background | Worker swarm | research, long document |
-| Research distributed | Explicit experimental pool | LAN pipeline benchmark |
+| Reflex | deterministic/native or local | adapter boundary only |
+| Private local | local phone/desktop model | foreground browser adapter boundary |
+| Interactive hard | stable complete worker or optional cloud | background worker API |
+| Background | worker replicas | implemented |
+| Distributed research | explicit LAN pool | deterministic transport reference only |
 
-The user must be able to disable all remote execution.
+The user must be able to avoid remote execution.
 
-## Phone components
+## PWA security design
 
-- wake-word detector,
-- voice activity detector,
-- offline STT,
-- benchmark-selected small local model,
-- local tool/action dispatcher,
-- offline TTS,
-- encrypted local memory with visible consent,
-- network policy router,
-- download/update verifier using the signed manifest protocol.
+The local vault:
 
-A Qwen-family checkpoint is a candidate, not a committed dependency. Exact checkpoint, quantization, license, and model-card terms require verification. Weight size alone is not RAM use; benchmark runtime buffers, KV cache, audio models, OS pressure, and thermal behavior.
+- derives a non-extractable AES key using PBKDF2-SHA-256 with 310,000 iterations and a random salt;
+- encrypts each IndexedDB record with AES-GCM, a random IV, and record-specific authenticated data;
+- stores only an encrypted verifier—not the passphrase or key;
+- keeps coordinator access tokens in `sessionStorage`, not IndexedDB or the service-worker cache;
+- explicitly allowlists shell assets, so authenticated API responses are never cached.
 
-## Android operating constraints
+The coordinator stores Web Push endpoints and keys encrypted. Actual server push requires a configured sender/VAPID deployment; otherwise the app displays notifications while it can check status and resumes polling when opened.
 
-The implementation must account for:
+## Push-to-talk
 
-- foreground-service and microphone disclosures,
-- background execution limits,
-- process death and state restoration,
-- screen-off tests,
-- thermal throttling,
-- charging-only/Wi-Fi-only host preferences,
-- metered-data consent,
-- low-storage handling,
-- interrupted signed updates,
-- headset/Bluetooth audio routes,
-- permission revocation.
+While visible, the PWA uses the browser Speech Recognition interface when available. If only `MediaRecorder` exists, it requests the microphone but discards captured audio because there is no approved transcription adapter. It does not upload or persist fallback audio.
 
-The initial phone should route and run its local reflex model. It should not host WAN transformer stages.
+A production offline voice stack would still need:
 
-## Latency service-level objectives
+- wake-word detector;
+- voice activity detector;
+- offline STT;
+- benchmark-selected small Qwen-family or other local model;
+- deterministic action dispatcher;
+- offline TTS;
+- signed artifact updater;
+- explicit local/private/background policy;
+- battery, thermal, headset, storage, and permission-revocation handling.
 
-Measure on named low/mid/high target Android devices:
+## Exact model gate
+
+A Qwen-family checkpoint is a candidate strategy, not a selected dependency. Selection requires:
 
 ```text
-Wake detection p50/p95
-End-of-speech detection p50/p95
-First local action p50/p95
-First spoken audio p50/p95
-Peak RSS
-Battery per 10 minutes of active dialogue
-Thermal throttling after 20 minutes
-Offline success rate
+exact checkpoint and tokenizer hashes
+license and commercial redistribution review
+quantization and conversion record
+named Android/iOS/desktop targets
+first-token and sustained decode results
+peak memory including KV/audio/runtime buffers
+thermal and battery results
+quality and safety benchmark report
 ```
 
-Initial targets:
+Weight-file size alone is not RAM use.
 
-- local action under 300 ms p50,
-- first spoken audio under 1 second p50 for reflex tasks,
-- no network dependency for the local suite.
+## Native Android decision
 
-These are targets, not current claims.
+If product requirements include wake word, screen-off use, guaranteed offline STT/TTS, or robust long-running local inference, build a native Android foreground service after the browser device matrix. The current sandbox does not contain Java/Gradle/Xcode and no native package was fabricated.
 
-## Local-versus-remote policy
+Native validation must cover process death/restoration, microphone disclosure, screen-off operation, thermal throttling, charging/Wi-Fi policies, metered data, low storage, interrupted updates, Bluetooth/headset routes, and permission revocation.
 
-Before remote submission, show or enforce:
+## Measurement matrix
 
-- sensitivity classification,
-- requested job class,
-- expected delay/cost,
-- selected model/worker policy,
-- cloud permission,
-- user cancellation.
+For named low/mid/high devices and browser/OS versions, publish:
 
-Secrets, payment credentials, private-vault content, and identity documents should default to local-only.
+```text
+installation/update/offline-shell success
+vault setup/unlock/data-loss behavior
+microphone and speech-interface behavior
+notification/push behavior when foreground/background/locked
+WebGPU adapter and local-model compatibility
+first local action and first audio p50/p95
+peak memory and storage
+battery per 10 minutes active dialogue
+thermal throttling after 20 minutes
+offline success rate
+```
 
-## Voice fallback
+Targets such as “local action under 300 ms p50” remain targets until measured.
+
+## Remote fallback policy
+
+Before remote submission, expose sensitivity, expected delay/cost, model/worker policy, and cancellation. Secrets, payment credentials, identity documents, and private-vault content should default to local-only.
 
 If no worker is available:
 
-1. answer locally if within capability,
-2. offer a queued background retry,
-3. use cloud only if the user enabled it,
-4. otherwise state that deep work is unavailable.
-
-Never fabricate a swarm answer.
-
-## Delivery phases
-
-1. Android shell and signed artifact updater.
-2. Wake word + offline STT/TTS without an LLM.
-3. Small local model benchmark bake-off.
-4. Deterministic local actions.
-5. Background `/jobs` submission and notification.
-6. Privacy settings, battery policies, and device matrix.
-7. Closed pilot in India before app-store launch.
+1. use a compatible registered local adapter if permitted;
+2. offer a queued background retry;
+3. use cloud only with explicit user policy;
+4. otherwise state that the capability is unavailable.

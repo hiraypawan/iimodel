@@ -310,6 +310,10 @@ test('signed coordinator provides truthful routing, durable jobs, safe teaching,
   });
   assert.equal(firstLease.body.job.id, retryJobId);
   db.prepare('UPDATE jobs SET lease_expires_at = ? WHERE id = ?').run(Date.now() - 1, retryJobId);
+  db.prepare(`
+    UPDATE job_attempts SET lease_expires_at = ?
+    WHERE id = ?
+  `).run(Date.now() - 1, firstLease.body.job.attempt_id);
   const secondLease = await jsonRequest(`${baseUrl}/worker/lease`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

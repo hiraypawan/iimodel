@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="II is an early decentralized AI network powered by host computers around the world.">
   <meta name="theme-color" content="#090a0c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <!-- Set this to the public coordinator origin when deploying separately on Cloudflare Pages. -->
   <meta name="ii-api-base" content="">
   <title>II — Intelligence, distributed</title>
@@ -577,6 +580,7 @@
         <a href="#network">Network</a>
         <a href="#architecture">Architecture</a>
         <a href="#pricing">Pricing</a>
+        <a href="/app.html">Open app</a>
         <a class="nav-cta" href="#genesis">Become a host</a>
       </nav>
     </div>
@@ -586,12 +590,12 @@
     <section class="hero">
       <div class="container hero-grid">
         <div>
-          <div class="kicker">Decentralized intelligence · MVP live</div>
+          <div class="kicker">Decentralized intelligence · v0.4 local reference</div>
           <h1>The model lives <span>everywhere.</span></h1>
-          <p class="hero-copy">II is building a trusted background-AI worker network, not pretending random phones are one instant supercomputer. Signed desktop workers run complete compatible models today; the future phone reflex stays local and private.</p>
+          <p class="hero-copy">II is building a trusted background-AI worker network, not pretending random phones are one instant supercomputer. Signed desktop workers can run complete compatible models when an operator supplies approved weights; the browser workspace stays local-first.</p>
           <div class="actions">
-            <a class="button button-primary" href="#genesis">Join Genesis 400 <span class="arrow">↗</span></a>
-            <a class="button button-secondary" href="#network">See how it works <span class="arrow">↓</span></a>
+            <a class="button button-primary" href="/app.html">Open II workspace <span class="arrow">↗</span></a>
+            <a class="button button-secondary" href="#genesis">Join Genesis 400 <span class="arrow">↓</span></a>
           </div>
           <div class="proof-line">
             <div class="avatars" aria-hidden="true"><span class="avatar">IN</span><span class="avatar">IN</span><span class="avatar">IN</span><span class="avatar">+</span></div>
@@ -635,14 +639,14 @@
         <div class="section-head">
           <div class="section-kicker">How the network works</div>
           <h2>Local reflex.<br>Deep-work network.</h2>
-          <p class="section-description">Signed identity, trusted releases, encrypted background jobs, and complete-GGUF workers are live. Phone voice, peer transfer, and distributed tensor execution remain measured roadmap work.</p>
+          <p class="section-description">Signed identity, encrypted jobs, isolated complete-GGUF workers, an installable PWA, and local peer/activation references are implemented. Licensed weights and physical phone, LAN, and NAT proof remain measured gates.</p>
         </div>
         <div class="steps">
           <article class="step">
             <span class="step-number">01 / VERIFY</span>
             <div class="step-icon">SIG</div>
             <h3>A PC verifies one release</h3>
-            <p>The v0.3 desktop verifies the publisher, exact SHA-256, byte size, and GGUF structure before it can claim readiness.</p>
+            <p>The v0.4 desktop verifies the publisher, exact SHA-256, byte size, and GGUF structure before it can claim readiness.</p>
           </article>
           <article class="step">
             <span class="step-number">02 / LEASE</span>
@@ -692,7 +696,7 @@
         <div>
           <div class="section-kicker">One Pro plan</div>
           <h2>Global product.<br>Local price.</h2>
-          <p class="section-description">Dodo Payments applies country pricing at checkout. The base product price is $20 USD per month.</p>
+          <p class="section-description">The Dodo product configuration defines country pricing with a $20 USD monthly base. Live checkout and webhook reconciliation still require operator validation.</p>
           <div class="billing-toggle" role="group" aria-label="Billing period">
             <button class="toggle-button active" type="button" data-billing="monthly">Monthly</button>
             <button class="toggle-button" type="button" data-billing="yearly">Yearly <span class="save">Tier 1 saves 20%</span></button>
@@ -730,10 +734,10 @@
         <div>
           <div class="section-kicker">Genesis 400</div>
           <h2>Host early.<br>Stay Pro.</h2>
-          <p class="section-description">The first 400 computers that successfully join as verified hosts become founding nodes—not just names on a waitlist.</p>
+          <p class="section-description">Up to 400 computers that successfully join as verified hosts can qualify as founding nodes under the final published program terms—not merely by joining a waitlist.</p>
           <ul class="benefits">
-            <li><span class="benefit-mark">∞</span><span><strong>Lifetime II Pro</strong><small>Free while Genesis host terms remain satisfied.</small></span></li>
-            <li><span class="benefit-mark">5</span><span><strong>Share a 5% profit pool</strong><small>Split among qualifying Genesis hosts; target is $25 per person in year one, not a guarantee.</small></span></li>
+            <li><span class="benefit-mark">∞</span><span><strong>Proposed lifetime II Pro</strong><small>Free only while final Genesis host terms remain satisfied.</small></span></li>
+            <li><span class="benefit-mark">5</span><span><strong>Proposed 5% profit pool</strong><small>Subject to legal approval and final terms; $25 per person in year one is a target, not a guarantee.</small></span></li>
             <li><span class="benefit-mark">#</span><span><strong>Your permanent host number</strong><small>Assigned only when the desktop client registers successfully.</small></span></li>
           </ul>
         </div>
@@ -774,7 +778,7 @@
   <footer class="site-footer">
     <div class="container footer-row">
       <a class="brand" href="#top"><span class="brand-mark">II</span><span>Internet Intelligence</span></a>
-      <span class="footer-copy">© 2026 II · v0.3 trusted worker network · Built in India.</span>
+      <span class="footer-copy">© 2026 II · v0.4 reliability reference · Built in India.</span>
       <span class="footer-status"><span class="live-dot offline" id="footerLiveDot"></span><span id="coordinatorStatus">Checking coordinator</span></span>
     </div>
   </footer>
@@ -908,6 +912,11 @@
     const genesisForm = document.getElementById('genesisForm');
     const formSubmit = document.getElementById('formSubmit');
     const formMessage = document.getElementById('formMessage');
+
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      navigator.serviceWorker.register('/service-worker.js', { scope: '/' })
+        .catch((error) => console.warn('[II] Offline shell unavailable:', error.message));
+    }
 
     genesisForm.addEventListener('submit', async (event) => {
       event.preventDefault();

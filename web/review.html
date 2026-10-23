@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0d0c">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="ii-api-base" content="">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
+  <title>II — Learning review</title>
+  <style>
+    :root { color-scheme: dark; --bg:#090b0a; --panel:#121512; --raised:#181c19; --line:rgba(255,255,255,.11); --text:#eef2eb; --muted:#909890; --acid:#caff58; --aqua:#70e7d9; --danger:#ff8d86; font-family:Inter,system-ui,sans-serif; }
+    * { box-sizing:border-box; } body { margin:0; color:var(--text); background:var(--bg); }
+    button,input,textarea { font:inherit; } button { cursor:pointer; }
+    header { min-height:68px; padding:0 24px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); }
+    .brand { display:flex; align-items:center; gap:10px; font-weight:750; }.mark { width:34px;height:34px;display:grid;place-items:center;border:1px solid rgba(202,255,88,.3);border-radius:10px;color:var(--acid);font:800 13px monospace; }
+    .shell { padding:20px; display:grid; grid-template-columns:320px minmax(0,1fr) 310px; gap:16px; }
+    .panel { min-height:calc(100dvh - 109px); border:1px solid var(--line); border-radius:17px; background:var(--panel); overflow:hidden; }
+    .panel-head { min-height:62px; padding:0 17px; display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line); }
+    h1,h2,h3,p { margin-top:0; } h1 { margin:0;font-size:14px; } h2 { margin:0;font-size:13px; }.eyebrow { color:#6f776f;font:700 8px monospace;letter-spacing:.12em;text-transform:uppercase; }
+    .list { padding:10px;display:grid;gap:7px; }.item { padding:12px;border:1px solid var(--line);border-radius:11px;background:transparent;color:var(--muted);text-align:left; }.item.active { border-color:rgba(202,255,88,.27);background:rgba(202,255,88,.04);color:var(--text); }.item strong { display:block;font-size:10px;overflow:hidden;text-overflow:ellipsis; }.item span { display:block;margin-top:6px;color:#697169;font:8px monospace; }
+    .content { padding:20px; }.placeholder { min-height:400px;display:grid;place-items:center;color:#697169;font-size:11px;text-align:center; }.meta { display:flex;gap:7px;flex-wrap:wrap;margin:11px 0 18px; }.tag { padding:5px 7px;border-radius:999px;background:var(--raised);color:var(--muted);font:8px monospace; }
+    .text-block { margin-top:12px;padding:15px;border:1px solid var(--line);border-radius:12px;background:#0c0f0d;white-space:pre-wrap;line-height:1.65;font-size:12px; }.text-block label { display:block;margin-bottom:10px;color:var(--aqua);font:700 8px monospace;text-transform:uppercase;letter-spacing:.1em; }
+    textarea,input { width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;color:var(--text);background:#0c0f0d; }.review-actions { margin-top:15px;display:grid;grid-template-columns:repeat(3,1fr);gap:7px; }.button { min-height:38px;border:1px solid var(--line);border-radius:10px;color:var(--text);background:var(--raised);font-size:9px;font-weight:700; }.approve { color:#111708;background:var(--acid);border-color:transparent; }.reject { color:var(--danger); }
+    .side { padding:17px; }.side section { padding:0 0 19px;margin-bottom:20px;border-bottom:1px solid var(--line); }.side h3 { margin:7px 0 12px;font-size:14px; }.side p { color:var(--muted);font-size:10px;line-height:1.55; }.row { display:flex;gap:7px; }.row input { min-width:0; }.status-list { display:grid;gap:7px; }.status-card { padding:10px;border:1px solid var(--line);border-radius:10px; }.status-card strong { display:block;font-size:9px; }.status-card span { display:block;margin-top:5px;color:#687068;font:8px monospace; }
+    dialog { width:min(430px,calc(100% - 30px));padding:24px;border:1px solid var(--line);border-radius:18px;color:var(--text);background:var(--panel); } dialog::backdrop { background:rgba(0,0,0,.76);backdrop-filter:blur(8px); }.field { margin-top:12px; }.field label { display:block;margin-bottom:6px;color:#727a72;font:700 8px monospace;text-transform:uppercase; }.error { min-height:16px;margin-top:9px;color:var(--danger);font-size:9px; }
+    @media(max-width:1000px){.shell{grid-template-columns:280px 1fr}.side{grid-column:1/-1;min-height:auto}} @media(max-width:700px){.shell{display:block;padding:9px}.panel{min-height:auto;margin-bottom:10px}.queue{max-height:300px}.review-actions{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<header><div class="brand"><span class="mark">II</span><div><h1>Learning review</h1><span class="eyebrow">human gate · no automatic merge</span></div></div><button class="button" id="connect">Admin connection</button></header>
+<main class="shell">
+  <aside class="panel queue"><div class="panel-head"><h2>Quarantine queue</h2><button class="button" id="refresh">Refresh</button></div><div class="list" id="teaching-list"></div></aside>
+  <section class="panel"><div class="panel-head"><h2>Contribution review</h2><span class="eyebrow" id="selection-status">Nothing selected</span></div><div class="content" id="review-content"><div class="placeholder">Select a contribution. Plaintext is fetched only after an explicit reviewer action and the view is audited.</div></div></section>
+  <aside class="panel side">
+    <section><span class="eyebrow">Dataset builder</span><h3>Immutable snapshot</h3><p>Approved, checked items can enter a draft. Sealing commits an item hash list and provenance.</p><div class="row"><input id="dataset-items" placeholder="Approved teaching IDs"><button class="button approve" id="create-dataset">Create</button></div></section>
+    <section><span class="eyebrow">Datasets</span><div class="status-list" id="datasets"></div></section>
+    <section><span class="eyebrow">External training</span><h3>Run status</h3><p>The coordinator records metadata and gates. It does not claim to run a GPU trainer.</p><div class="status-list" id="runs"></div></section>
+  </aside>
+</main>
+<dialog id="connection-dialog"><form method="dialog" id="connection-form"><h2>Admin connection</h2><p>Credentials remain in this tab's session storage.</p><div class="field"><label for="api-base">API base</label><input id="api-base" type="url" placeholder="Same origin"></div><div class="field"><label for="admin-token">Admin token</label><input id="admin-token" type="password" autocomplete="off" required></div><div class="field"><label for="reviewer-id">Reviewer ID</label><input id="reviewer-id" required maxlength="120"></div><div class="error" id="connection-error"></div><div class="row"><button class="button" type="button" id="cancel-connection">Cancel</button><button class="button approve" id="save-connection" type="submit">Connect</button></div></form></dialog>
+<script src="/review.js" defer></script>
+</body>
+</html>

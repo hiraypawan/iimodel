@@ -1,12 +1,12 @@
 {
   "name": "ii-network-coordinator",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Trusted coordinator for the II background AI worker network",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check jobs.js && node --check learning.js && node --check model-registry.js && node --check security.js",
+    "check": "node --check server.js && node --check accounts.js && node --check billing.js && node --check jobs.js && node --check learning.js && node --check privacy.js && node --check reliability.js && node --check model-registry.js && node --check security.js",
     "test": "node --test *.test.js",
     "configure:dodo": "node configure-dodo.js",
     "keygen:release": "node generate-release-key.js",
