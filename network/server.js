@@ -5,9 +5,16 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const express = require('express');
 const Database = require('better-sqlite3');
+const { installAccountRoutes } = require('./accounts');
+const { installBillingRoutes } = require('./billing');
 const { installJobRoutes } = require('./jobs');
 const { installLearningRoutes } = require('./learning');
 const { installModelRoutes, validateArtifactClaim } = require('./model-registry');
+const {
+  installReliabilityRoutes,
+  normalizeCapabilities,
+  upsertWorkerCapabilities,
+} = require('./reliability');
 const {
   authenticateHost,
   parseEncryptionKey,
@@ -53,6 +60,16 @@ ensureColumn('devices', 'experts_end', 'INTEGER');
 ensureColumn('devices', 'last_heartbeat', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('devices', 'public_key', 'TEXT');
 ensureColumn('devices', 'last_signed_at', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('jobs', 'job_kind', "TEXT NOT NULL DEFAULT 'inference'");
+ensureColumn('jobs', 'expected_output_hash', 'TEXT');
+ensureColumn('jobs', 'required_results', 'INTEGER NOT NULL DEFAULT 1');
+ensureColumn('jobs', 'desired_region', 'TEXT');
+ensureColumn('jobs', 'hedge_after_ms', 'INTEGER NOT NULL DEFAULT 2000');
+ensureColumn('jobs', 'max_parallel_attempts', 'INTEGER NOT NULL DEFAULT 2');
+ensureColumn('jobs', 'winning_attempt_id', 'TEXT');
+ensureColumn('jobs', 'comparison_status', "TEXT NOT NULL DEFAULT 'not_requested'");
+ensureColumn('jobs', 'priority', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('jobs', 'user_id', 'TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS idx_devices_last_heartbeat ON devices(last_heartbeat DESC)');
 
 // v0.2 mixed desired assignments with claims of files actually hosted. Preserve
@@ -89,7 +106,12 @@ if (process.env.TRUST_PROXY) {
     ? true
     : /^\d+$/.test(trustProxy) ? Number.parseInt(trustProxy, 10) : trustProxy);
 }
-app.use(express.json({ limit: '128kb' }));
+app.use(express.json({
+  limit: '128kb',
+  verify: (req, _res, buffer) => {
+    if (req.originalUrl === '/webhooks/dodo') req.rawBody = Buffer.from(buffer);
+  },
+}));
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '*')
   .split(',')
@@ -105,9 +127,14 @@ app.use((req, res, next) => {
     res.set('Vary', 'Origin');
   }
 
-  res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-  res.set('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Reviewer-Id');
+  res.set('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   res.set('Cache-Control', 'no-store');
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('X-Frame-Options', 'DENY');
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self)');
+  res.set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; img-src 'self' data:; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://checkout.dodopayments.com");
 
   if (req.method === 'OPTIONS') {
     return res.sendStatus(204);
@@ -462,6 +489,12 @@ function registerHandler(req, res) {
 
   const registration = registerDevice(details);
   replaceHostedArtifacts(deviceId, artifactResult.claims, now);
+  upsertWorkerCapabilities(
+    db,
+    deviceId,
+    normalizeCapabilities(body.capabilities, details.country),
+    now,
+  );
   const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(deviceId);
   return res.status(registration.created ? 201 : 200).json({
     ok: true,
@@ -473,6 +506,7 @@ function registerHandler(req, res) {
 
 const recordHeartbeat = db.transaction((details) => {
   replaceHostedArtifacts(details.deviceId, details.claims, details.now);
+  upsertWorkerCapabilities(db, details.deviceId, details.capabilities, details.now);
   db.prepare(`
     UPDATE devices
     SET status = ?,
@@ -530,12 +564,14 @@ function heartbeatHandler(req, res) {
     });
   }
   const now = Date.now();
+  const deviceCountry = db.prepare('SELECT country FROM devices WHERE id = ?').get(deviceId)?.country;
 
   recordHeartbeat({
     deviceId,
     status,
     now,
     claims: artifactResult.claims,
+    capabilities: normalizeCapabilities(body.capabilities, deviceCountry),
     latencyMs,
     endpoint,
     signedAt: auth.signedAt,
@@ -661,29 +697,10 @@ function networkStats() {
   };
 }
 
-// TODO-REAL: Replace research-only prompt hashing with IDs produced by a measured,
-// versioned router for an exact executable model topology.
-function expertsForPrompt(prompt) {
-  const selected = new Set();
-  let round = 0;
-  while (selected.size < 5) {
-    const digest = crypto.createHash('sha256').update(`${round}:${prompt}`).digest();
-    for (let offset = 0; offset < digest.length && selected.size < 5; offset += 2) {
-      selected.add(digest.readUInt16BE(offset) % EXPERT_COUNT);
-    }
-    round += 1;
-  }
-  return [...selected];
-}
-
 function parseRequestedExperts(req) {
   const raw = req.query.expert_ids ?? req.query.experts ?? req.query.expert;
   if (raw === undefined || raw === '') {
-    const prompt = cleanText(req.query.prompt, 4_000);
-    return {
-      experts: prompt ? expertsForPrompt(prompt) : [],
-      selectionMethod: prompt ? 'deterministic_prompt_hash' : null,
-    };
+    return { experts: [], selectionMethod: null };
   }
 
   const pieces = Array.isArray(raw) ? raw : String(raw).split(',');
@@ -855,13 +872,22 @@ const revokeHost = db.transaction((device, reason, now) => {
   db.prepare('DELETE FROM host_artifacts WHERE device_id = ?').run(device.id);
   db.prepare('DELETE FROM device_experts WHERE device_id = ?').run(device.id);
   db.prepare(`
+    UPDATE job_attempts
+    SET status = 'cancelled', error = 'Host was revoked.', completed_at = ?
+    WHERE device_id = ? AND status = 'active'
+  `).run(now, device.id);
+  db.prepare(`
     UPDATE jobs
     SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,
         error = CASE WHEN attempts >= max_attempts THEN 'Assigned host was revoked.' ELSE error END,
         lease_device_id = NULL, lease_token_hash = NULL, lease_expires_at = NULL,
         updated_at = ?
-    WHERE status = 'leased' AND lease_device_id = ?
-  `).run(now, device.id);
+    WHERE status = 'leased'
+      AND NOT EXISTS (
+        SELECT 1 FROM job_attempts ja
+        WHERE ja.job_id = jobs.id AND ja.status = 'active'
+      )
+  `).run(now);
 });
 
 function revokeHostHandler(req, res) {
@@ -888,7 +914,7 @@ app.get('/health', (_req, res) => {
   res.json({
     ok: true,
     service: 'ii-coordinator',
-    version: '0.3.0',
+    version: '0.4.0',
     signedHostsRequired: process.env.II_ALLOW_UNSIGNED_HOSTS !== 'true',
     releaseTrustConfigured: Boolean(process.env.II_RELEASE_PUBLIC_KEY),
     encryptedWorkConfigured: Boolean(parseEncryptionKey()),
@@ -908,109 +934,11 @@ app.post(
   revokeHostHandler,
 );
 installModelRoutes(app, db);
+installAccountRoutes(app, db);
+installReliabilityRoutes(app, db);
 installJobRoutes(app, db);
 installLearningRoutes(app, db);
-
-app.get(['/checkout/:plan', '/api/checkout/:plan'], async (req, res) => {
-  const plan = req.params.plan;
-  if (!['monthly', 'yearly'].includes(plan)) {
-    return res.status(404).json({ error: 'unknown_plan', message: 'Choose monthly or yearly.' });
-  }
-
-  // A pre-created Dodo payment link is the simplest production setup.
-  const directLinks = {
-    monthly: process.env.DODO_MONTHLY_URL || process.env.DODO_MONTHLY_CHECKOUT_URL,
-    yearly: process.env.DODO_YEARLY_URL || process.env.DODO_YEARLY_CHECKOUT_URL,
-  };
-  if (directLinks[plan] && /^https:\/\//i.test(directLinks[plan])) {
-    return res.redirect(302, directLinks[plan]);
-  }
-
-  // Alternatively, create a fresh checkout through Dodo's API. Localized prices
-  // are selected automatically because both products must be configured with
-  // pricing_mode=by_country in Dodo.
-  const productIds = {
-    monthly: process.env.DODO_MONTHLY_PRODUCT_ID,
-    yearly: process.env.DODO_YEARLY_PRODUCT_ID,
-  };
-  const apiKey = process.env.DODO_PAYMENTS_API_KEY;
-  const productId = productIds[plan];
-
-  if (!apiKey || !productId) {
-    return res.status(503).json({
-      error: 'checkout_not_configured',
-      message: `Set a Dodo checkout URL or DODO_${plan.toUpperCase()}_PRODUCT_ID with DODO_PAYMENTS_API_KEY.`,
-      pricingMode: 'by_country',
-    });
-  }
-
-  const dodoBaseUrl = (
-    process.env.DODO_PAYMENTS_BASE_URL
-    || (process.env.DODO_PAYMENTS_ENVIRONMENT === 'live_mode'
-      ? 'https://live.dodopayments.com'
-      : 'https://test.dodopayments.com')
-  ).replace(/\/$/, '');
-  const publicWebUrl = (
-    process.env.PUBLIC_WEB_URL
-    || `${req.protocol}://${req.get('host')}`
-  ).replace(/\/$/, '');
-
-  try {
-    const response = await fetch(`${dodoBaseUrl}/checkouts`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      signal: AbortSignal.timeout(15_000),
-      body: JSON.stringify({
-        product_cart: [{ product_id: productId, quantity: 1 }],
-        return_url: `${publicWebUrl}/?checkout=success`,
-        cancel_url: `${publicWebUrl}/#pricing`,
-        short_link: true,
-        metadata: { plan, source: 'ii-web' },
-      }),
-    });
-    const checkout = await response.json().catch(() => ({}));
-
-    if (!response.ok || !checkout.checkout_url) {
-      console.error(
-        '[coordinator] Dodo checkout failed:',
-        response.status,
-        cleanText(checkout?.message || checkout?.error, 200, 'unknown provider error'),
-      );
-      return res.status(502).json({
-        error: 'checkout_provider_error',
-        message: 'Dodo Payments could not create a checkout. Please try again.',
-      });
-    }
-
-    let checkoutUrl;
-    try {
-      checkoutUrl = new URL(checkout.checkout_url);
-    } catch {
-      return res.status(502).json({
-        error: 'invalid_checkout_url',
-        message: 'Dodo Payments returned an invalid checkout URL.',
-      });
-    }
-    if (checkoutUrl.protocol !== 'https:') {
-      return res.status(502).json({
-        error: 'invalid_checkout_url',
-        message: 'Dodo Payments returned a non-secure checkout URL.',
-      });
-    }
-
-    return res.redirect(303, checkoutUrl.toString());
-  } catch (error) {
-    console.error('[coordinator] Dodo API unavailable:', error.message);
-    return res.status(502).json({
-      error: 'checkout_provider_unavailable',
-      message: 'Dodo Payments is temporarily unavailable. Please try again.',
-    });
-  }
-});
+installBillingRoutes(app, db);
 
 const webDirectory = path.join(__dirname, '..', 'web');
 if (fs.existsSync(webDirectory)) {

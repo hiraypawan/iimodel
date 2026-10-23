@@ -1,98 +1,131 @@
-# Distributed Inference Runtime Plan
+# Distributed Inference Runtime
 
-Status: not implemented. v0.3 runs complete compatible GGUF worker replicas and treats distributed tensors as a separate measured research track.
+## Current status
 
-## Why metadata sharding is insufficient
+v0.4 includes a **real local activation-transport reference** in `distributed/`:
 
-A database mapping `expert_id → host` does not execute a model. A transformer forward pass also needs exact shared tensors, layer order, activation shapes, router decisions, KV-cache ownership, dtype/quantization compatibility, sampling state, and cancellation/failure semantics.
+- two independent Node worker processes;
+- binary little-endian `Float32` activation frames over HTTP;
+- contiguous layer partitions;
+- HMAC authentication, timestamp window, nonce replay rejection;
+- bounded frame/layer/width validation;
+- input/output SHA-256 checks;
+- per-stage bytes, total time, reported compute time, and measured transport overhead;
+- p50/p95 benchmark harness;
+- explicit stage/elapsed failure when a worker is killed.
 
-Many MoE architectures have routed experts at multiple layers. “256 experts” may mean experts per MoE layer rather than 256 standalone global files. Dividing total bytes by 256 is not an executable shard definition.
+The computation is `deterministic-nonlinear-v1`, not a transformer. Every result states `production_model: false`. This proves that bytes really cross process/network sockets and that failure is measurable; it does **not** prove Qwen, GGUF splitting, a physical LAN, or useful distributed-model performance.
 
-## Required tensor topology
+Run the local reference:
 
-A future signed topology must identify:
-
-```text
-checkpoint and tokenizer hashes
-layer count and ordering
-shared tensors
-attention tensors
-router tensors
-expert tensors keyed by layer and expert index
-input/output activation dtype and shape
-quantization parameters
-KV-cache ownership
-runtime ABI
+```bash
+export II_ACTIVATION_SECRET='<at least 24 random bytes>'
+HOST=0.0.0.0 PORT=7801 node distributed/activation-worker.js
+HOST=0.0.0.0 PORT=7802 node distributed/activation-worker.js
+II_ACTIVATION_NODES=http://127.0.0.1:7801,http://127.0.0.1:7802 \
+  node distributed/benchmark.js
 ```
 
-## Recommended experiment order
+## Why expert metadata is not inference
 
-### A. Baseline
+A SQLite mapping `expert_id → host` does not execute a model. A transformer forward pass also requires exact shared tensors, layer order, router decisions, activation shapes, quantization/dtype agreement, tokenizer and sampling state, KV-cache ownership, backpressure, cancellation, and failure semantics.
 
-Run one exact 1B–3B model on one desktop. Record first-token latency, tokens/second, RSS/VRAM, power, and output hash in deterministic mode.
+Many MoE checkpoints use experts at multiple layers. “256 experts” may mean experts per MoE layer—not 256 globally independent files. Dividing bytes by 256 is not an executable topology.
 
-### B. Two desktops on one LAN
+The coordinator therefore routes only explicit expert IDs from manifest-backed SQLite claims. It no longer hashes a prompt into five pretend experts. Complete compatible GGUF replicas remain the production background-job path.
 
-Use a runtime that genuinely supports layer/RPC splitting. Do not manually cut GGUF bytes. Record activation bytes, serialization cost, compute time per stage, and end-to-end metrics.
+## Physical two-node Qwen gate
+
+A valid physical proof requires all of the following:
+
+```text
+exact checkpoint and tokenizer names + hashes
+verified license/model-card/commercial redistribution terms
+reproducible conversion and quantization record
+exact layer/tensor partition and runtime ABI
+activation dtype, shape, framing, and quantization
+shared tensor and KV-cache ownership
+one-device baseline on named hardware
+second machine on a described physical LAN
+full prompt-to-generated-token execution
+failure/cancellation/cache cleanup result
+published raw and summarized measurements
+```
+
+A Qwen-family candidate is preferred, but no exact checkpoint is selected in this repository because weights, license evidence, target hardware, and measurements were not supplied.
+
+## Required experiment order
+
+### A. One-device baseline
+
+Run the exact 1B–3B candidate on one desktop. Record:
+
+- first-token p50/p95;
+- decode tokens/second;
+- peak RSS/VRAM;
+- prompt and output token counts;
+- power where available;
+- deterministic-mode output hash and capability score.
+
+### B. Two physical LAN nodes
+
+Use a runtime that genuinely supports layer/RPC splitting. Do not cut GGUF bytes manually. Record:
+
+- activation bytes for prefill and per generated token;
+- serialization/deserialization time;
+- compute time per stage;
+- end-to-end first-token and decode latency;
+- throughput with one and concurrent requests;
+- memory and network utilization on both machines.
 
 ### C. Failure behavior
 
-Disconnect stage two during prefill and generation. The request must time out/cancel cleanly, free cache, and either restart on a complete replica or return a truthful failure.
+Disconnect node two during prefill and generation. The request must time out/cancel within a declared bound, free stage state, and either restart from a complete replica or return a truthful failure. It must not splice unrelated independently sampled token streams.
 
-### D. Three LAN stages
+### D. Larger topology/WAN
 
-Advance only if the two-node result provides a useful capability/throughput tradeoff.
+Advance to three LAN stages only if two nodes offer a useful tradeoff. Controlled WAN tests come later and must publish p50/p95/p99. Random phones are not the first distributed runtime target.
 
-### E. Controlled WAN
+## Protocol requirements beyond the local reference
 
-Test fixed stable hosts and publish p50/p95/p99. Random phones are not the first WAN target.
-
-## Protocol requirements
-
-- request/session IDs,
-- model and topology IDs,
-- stage lease and expiry,
-- tensor sequence numbers,
-- shape/dtype validation,
-- bounded activation frames,
-- authenticated encrypted transport,
-- backpressure,
-- prefill/generation distinction,
-- KV-cache lifecycle,
-- cancellation propagation,
-- retry boundary,
-- metrics without prompt logging.
+- topology and model IDs bound into every request;
+- session/stage lease and expiry;
+- tensor sequence numbers;
+- shape/dtype/quantization validation;
+- encrypted transport in addition to authentication;
+- backpressure and bounded queueing;
+- prefill/generation distinction;
+- KV-cache allocation/ownership/lifetime;
+- cancellation propagation;
+- restart boundary and complete-replica fallback;
+- metrics without prompt or activation logging.
 
 ## Parallelism choices
 
 ### Complete-model replication
 
-Implemented direction for v0.3 jobs. It increases throughput and reliability and avoids per-token WAN hops. This is the default production path.
+Implemented for background jobs. It improves aggregate throughput/reliability and avoids per-token WAN dependencies.
 
 ### Pipeline parallelism
 
-Research path. Every autoregressive token traverses sequential stages. More hosts improve aggregate throughput but not the dependency chain for one sequence.
+Physical research gate. Every autoregressive token crosses sequential stages, so network and slowest-stage latency matter.
 
 ### Tensor parallelism
 
-Not suitable over ordinary internet links; it expects very high bandwidth and low latency.
+Generally unsuitable for ordinary internet links; it expects very high bandwidth and low latency.
 
 ### Remote MoE experts
 
-Potentially useful only with a custom runtime and local/shared backbone. Expert calls may occur at many transformer layers; it is not simply two network requests per answer.
+Requires a custom runtime and exact shared backbone. Expert calls can occur at many transformer layers and are not “two network requests per answer.”
 
-### Hedging
+### Job hedging
 
-Initially hedge complete background jobs, select one valid attempt, and cancel losers. Hedging consumes multiple workers and should be policy-controlled. Do not splice tokens from independently sampled pipelines.
-
-## Churn
-
-A distributed stage plan must be selected from compatible live hosts with replication. If a stage disappears mid-token, another host usually cannot resume without the exact KV/cache state. Practical recovery may require restarting generation on a complete replica.
+Implemented separately for complete background jobs. At most two workers run a delayed duplicate; the first accepted result cancels the other. Duplicate verification compares complete normalized result hashes. Tokens from separate attempts are never combined.
 
 ## Privacy
 
-Intermediate activations may leak prompt information. Encryption protects transit, not the peer doing computation. Do not market activations as anonymous.
+Activations can leak information about prompts. Encryption protects transport, not a stage that performs computation. Do not market intermediate tensors as anonymous.
 
-## Exit criterion
+## Claim boundary
 
-II may claim distributed inference only after a reproducible physical multi-node test executes one exact model, publishes topology and metrics, survives a defined failure test, and is compared with a one-device baseline. Until then, the production worker network means complete-model background replicas.
+II may claim **local two-process activation transport** now. It may claim **physical distributed model inference** only after the physical gate above runs one exact licensed checkpoint across two machines and publishes comparable evidence.

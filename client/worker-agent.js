@@ -9,6 +9,8 @@ class WorkerAgent {
     inference,
     pollIntervalMs = 3_000,
     requestTimeoutMs = 15_000,
+    cancellationPollMs = 1_000,
+    capabilities = () => ({}),
     onState = () => {},
   }) {
     this.coordinatorUrl = coordinatorUrl.replace(/\/$/, '');
@@ -16,6 +18,8 @@ class WorkerAgent {
     this.inference = inference;
     this.pollIntervalMs = pollIntervalMs;
     this.requestTimeoutMs = requestTimeoutMs;
+    this.cancellationPollMs = cancellationPollMs;
+    this.capabilities = capabilities;
     this.onState = onState;
     this.timer = null;
     this.running = false;
@@ -40,28 +44,81 @@ class WorkerAgent {
     if (this.running || this.stopped || !this.inference?.loaded) return null;
     this.running = true;
     try {
-      const leaseResponse = await this.post('/worker/lease', 'worker:lease', {});
+      const leaseResponse = await this.post('/worker/lease', 'worker:lease', {
+        capabilities: this.capabilities(),
+      });
       const job = leaseResponse.body?.job;
       if (!job) return null;
-      this.onState({ phase: 'working', jobId: job.id, message: 'Running a private background job…' });
+      this.onState({
+        phase: 'working',
+        jobId: job.id,
+        attemptId: job.attempt_id,
+        message: job.is_hedge ? 'Running a delayed backup attempt…' : 'Running an isolated background job…',
+      });
       const startedAt = performance.now();
+      const controller = new AbortController();
+      let cancellationTimer;
+      let cancelledByCoordinator = false;
+      const pollCancellation = async () => {
+        try {
+          const status = await this.post(
+            `/worker/attempts/${job.attempt_id}/status`,
+            'worker:attempt-status',
+            { attempt_id: job.attempt_id, lease_token: job.lease_token },
+          );
+          if (status.body?.cancel_requested || status.body?.status !== 'active') {
+            cancelledByCoordinator = status.body?.status === 'cancelled';
+            controller.abort(new Error('Attempt cancelled by coordinator.'));
+          }
+        } catch {
+          // A transient status-check failure must not discard a valid lease.
+        }
+      };
+      cancellationTimer = setInterval(() => void pollCancellation(), this.cancellationPollMs);
+      cancellationTimer.unref?.();
       try {
-        const output = await this.inference.infer(job.prompt, job.max_tokens);
+        const output = await this.inference.infer(job.prompt, job.max_tokens, {
+          signal: controller.signal,
+          temperature: job.temperature,
+          seed: job.seed,
+        });
+        if (cancelledByCoordinator) {
+          return { id: job.id, attemptId: job.attempt_id, status: 'cancelled' };
+        }
         const durationMs = Math.round(performance.now() - startedAt);
-        await this.post(`/worker/jobs/${job.id}/complete`, 'worker:complete', {
+        const completed = await this.post(`/worker/jobs/${job.id}/complete`, 'worker:complete', {
+          attempt_id: job.attempt_id,
           lease_token: job.lease_token,
           output,
           metrics: { duration_ms: durationMs },
         });
-        this.onState({ phase: 'hosting', jobId: null, message: 'Connected, verified, and ready for jobs' });
-        return { id: job.id, status: 'completed', durationMs };
+        const status = completed.body?.status || 'completed';
+        this.onState({ phase: 'hosting', jobId: null, attemptId: null, message: 'Connected, verified, and ready for jobs' });
+        return { id: job.id, attemptId: job.attempt_id, status, durationMs };
       } catch (error) {
-        await this.post(`/worker/jobs/${job.id}/fail`, 'worker:fail', {
-          lease_token: job.lease_token,
+        if (!cancelledByCoordinator) {
+          await this.post(`/worker/jobs/${job.id}/fail`, 'worker:fail', {
+            attempt_id: job.attempt_id,
+            lease_token: job.lease_token,
+            error: error.message,
+          }).catch(() => {});
+        }
+        this.onState({
+          phase: 'hosting',
+          jobId: null,
+          attemptId: null,
+          message: cancelledByCoordinator
+            ? 'Backup attempt cancelled after another worker completed'
+            : 'Job failed safely; waiting for work',
+        });
+        return {
+          id: job.id,
+          attemptId: job.attempt_id,
+          status: cancelledByCoordinator ? 'cancelled' : 'failed',
           error: error.message,
-        }).catch(() => {});
-        this.onState({ phase: 'hosting', jobId: null, message: 'Job failed safely; waiting for work' });
-        return { id: job.id, status: 'failed', error: error.message };
+        };
+      } finally {
+        clearInterval(cancellationTimer);
       }
     } finally {
       this.running = false;

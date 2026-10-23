@@ -48,15 +48,14 @@ class LocalInferenceServer {
     this.server = null;
     this.llama = null;
     this.model = null;
-    this.context = null;
-    this.session = null;
+    this.ChatSessionClass = null;
     this.modelPath = null;
     this.loadError = null;
     this.queue = Promise.resolve();
   }
 
   get loaded() {
-    return Boolean(this.session);
+    return Boolean(this.model && this.ChatSessionClass);
   }
 
   get localEndpoint() {
@@ -97,12 +96,12 @@ class LocalInferenceServer {
   }
 
   async disposeRuntime() {
-    this.session?.dispose?.();
-    await this.context?.dispose?.();
+    // Model replacement and shutdown wait for the serialized request queue so
+    // a model is never disposed while an isolated job context is using it.
+    await this.queue.catch(() => {});
     await this.model?.dispose?.();
     await this.llama?.dispose?.();
-    this.session = null;
-    this.context = null;
+    this.ChatSessionClass = null;
     this.model = null;
     this.llama = null;
     this.modelPath = null;
@@ -116,7 +115,7 @@ class LocalInferenceServer {
       this.loadError = 'No compatible GGUF model is configured.';
       return false;
     }
-    // TODO-REAL: Add a runtime-supported distributed expert graph for an exact
+    // EXTERNAL GATE: add a runtime-supported distributed expert graph for an exact
     // signed model topology; an isolated safetensors file is not a language model.
     if (path.extname(modelPath).toLowerCase() !== '.gguf') {
       this.loadError = 'node-llama-cpp requires a GGUF model; raw safetensors cannot be executed.';
@@ -128,10 +127,7 @@ class LocalInferenceServer {
       const { getLlama, LlamaChatSession } = await import('node-llama-cpp');
       this.llama = await getLlama();
       this.model = await this.llama.loadModel({ modelPath });
-      this.context = await this.model.createContext({ contextSize: 2_048 });
-      this.session = new LlamaChatSession({
-        contextSequence: this.context.getSequence(),
-      });
+      this.ChatSessionClass = LlamaChatSession;
       this.modelPath = modelPath;
       return true;
     } catch (error) {
@@ -141,14 +137,35 @@ class LocalInferenceServer {
     }
   }
 
-  async infer(prompt, maxTokens) {
-    if (!this.session) {
+  async infer(prompt, maxTokens, { signal, temperature, seed } = {}) {
+    if (!this.loaded) {
       const error = new Error('expert not loaded yet');
       error.statusCode = 503;
       throw error;
     }
 
-    const execute = async () => this.session.prompt(prompt, { maxTokens });
+    const execute = async () => {
+      let context;
+      let session;
+      try {
+        signal?.throwIfAborted?.();
+        // Every independent job receives a fresh context sequence and chat
+        // session. Model weights remain shared, while KV/conversation state is
+        // destroyed after the response to prevent cross-customer leakage.
+        context = await this.model.createContext({ contextSize: 2_048 });
+        session = new this.ChatSessionClass({
+          contextSequence: context.getSequence(),
+        });
+        const promptOptions = { maxTokens };
+        if (signal) promptOptions.signal = signal;
+        if (Number.isFinite(temperature)) promptOptions.temperature = temperature;
+        if (Number.isInteger(seed)) promptOptions.seed = seed;
+        return await session.prompt(prompt, promptOptions);
+      } finally {
+        await session?.dispose?.();
+        await context?.dispose?.();
+      }
+    };
     const result = this.queue.then(execute, execute);
     this.queue = result.catch(() => {});
     return result;

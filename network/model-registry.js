@@ -102,23 +102,39 @@ function installModelRoutes(app, db) {
     const existing = db.prepare('SELECT manifest_id FROM model_manifests WHERE manifest_id = ?')
       .get(manifest.manifest_id);
     try {
-      db.prepare(`
-        INSERT INTO model_manifests (
-          manifest_id, model_id, version, role, runtime, manifest_json,
-          signature, publisher_public_key, active, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-        ON CONFLICT(manifest_id) DO UPDATE SET active = 1
-      `).run(
-        manifest.manifest_id,
-        manifest.model_id,
-        manifest.version,
-        manifest.role,
-        manifest.runtime,
-        JSON.stringify(manifest),
-        manifest.signature,
-        manifest.publisher_public_key,
-        Date.parse(manifest.created_at || '') || Date.now(),
-      );
+      const publish = db.transaction(() => {
+        db.prepare(`
+          INSERT INTO model_manifests (
+            manifest_id, model_id, version, role, runtime, manifest_json,
+            signature, publisher_public_key, active, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+          ON CONFLICT(manifest_id) DO UPDATE SET active = 1
+        `).run(
+          manifest.manifest_id,
+          manifest.model_id,
+          manifest.version,
+          manifest.role,
+          manifest.runtime,
+          JSON.stringify(manifest),
+          manifest.signature,
+          manifest.publisher_public_key,
+          Date.parse(manifest.created_at || '') || Date.now(),
+        );
+        const configuredTarget = Number.parseInt(process.env.II_DEFAULT_REPLICA_TARGET || '2', 10);
+        const target = Number.isInteger(configuredTarget)
+          ? Math.min(1000, Math.max(1, configuredTarget))
+          : 2;
+        const minimumRegions = Math.min(target, target > 1 ? 2 : 1);
+        const insertTarget = db.prepare(`
+          INSERT OR IGNORE INTO replica_targets (
+            manifest_id, artifact_id, target_replicas, min_regions, updated_at
+          ) VALUES (?, ?, ?, ?, ?)
+        `);
+        for (const artifact of manifest.artifacts) {
+          insertTarget.run(manifest.manifest_id, artifact.id, target, minimumRegions, Date.now());
+        }
+      });
+      publish();
     } catch (error) {
       if (/UNIQUE constraint failed: model_manifests\.model_id/.test(error.message)) {
         return res.status(409).json({

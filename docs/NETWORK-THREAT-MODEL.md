@@ -1,151 +1,166 @@
 # II Network Threat Model
 
-Status: v0.3 implementation boundary. This document covers `network/`, `client/`, and `protocol/`; it does not certify the earlier local Python research engine.
+Status: v0.4 software boundary. This covers `network/`, `client/`, `protocol/`, `web/`, `p2p/`, and `distributed/`. It is not an independent audit or certification.
 
 ## Assets
 
-- release-signing private key,
-- host private keys,
-- model artifacts and manifests,
-- prompts and results,
-- consented teaching pairs,
-- job/teaching receipt tokens,
-- payment and administrator credentials,
-- Genesis applicant data.
+- release and adapter-signing private keys;
+- host/peer private keys;
+- model/adapter artifacts and manifests;
+- job prompts/results and teaching/review content;
+- browser-vault conversations and passphrases;
+- job/teaching/lease/identity/API tokens;
+- Dodo API and webhook credentials and provider payloads;
+- user identity, subscription, entitlement, audit, fraud, and Genesis data.
 
 ## Trust boundaries
 
-| Boundary | Trusted today | Not trusted |
+| Boundary | Verified | Not established |
 |---|---|---|
-| Release publication | Configured Ed25519 publisher key | Artifact mirrors and arbitrary manifests |
-| Host identity | Possession of registered Ed25519 key | Host-reported performance and execution correctness |
-| Coordinator | Operator process and encryption key | Public API clients |
-| Worker execution | Exact artifact identity and signed host | Prompt confidentiality and result correctness |
-| Teaching intake | Explicit consent + basic scanner | Claim that an adapter is safe or private |
-| Dodo | Authenticated provider API response | Browser-supplied pricing or entitlement claims |
+| Release | Ed25519 publisher, canonical payload, exact artifact metadata | quality, malware absence, license rights |
+| Host | Ed25519 key possession, signed claims/replay window | physical machine uniqueness, honest hardware/location, correct inference |
+| Worker result | challenge/duplicate observations and score history | confidential computing or universal semantic correctness |
+| Coordinator | process, DB, configured encryption keys | safety after process/key compromise |
+| Browser vault | Web Crypto ciphertext while locked | protection from active XSS/browser/OS compromise or weak passphrase |
+| Peer transfer | peer signature, bounded range, final hash | public NAT reachability, peer availability, safe operated relay |
+| Activation reference | HMAC, replay/shape/hash/timeout checks | encryption, transformer correctness, physical LAN performance |
+| Learning | consent, deterministic scan, review/provenance/gates/signature states | completeness of scanner or truth of external benchmark/privacy reports |
+| Dodo | exact Standard Webhooks signature, replay/idempotency/correlation | live provider operation, accounting/legal correctness |
 
 ## Implemented controls
 
 ### Release poisoning
 
-- Manifest payloads use deterministic canonical JSON.
-- `manifest_id` is SHA-256 of the unsigned payload.
-- Ed25519 signatures are verified against independently configured `II_RELEASE_PUBLIC_KEY`.
-- Artifact URL, size, format, hash, role, runtime, and expert ID are covered by the signature.
-- Clients hash downloaded bytes before use and store expected-hash artifacts in content-addressed paths.
-- An operator can deactivate a release; queued and leased jobs for it fail closed.
+- deterministic canonical JSON and manifest IDs;
+- Ed25519 verification against configured trusted public key;
+- signed URL/hash/size/format/role/runtime/expert metadata;
+- download SHA-256 and content-addressed storage;
+- manifest deactivation and host revocation.
 
-A release signature proves only which publisher authorized bytes. It does not prove benchmark quality, absence of malware, safety, or legal redistribution rights.
+Signatures identify an authorizer. They do not prove legal redistribution, model safety, or benchmark quality.
 
-### Host spoofing and replay
+### Host spoofing/replay and renderer isolation
 
-- Device IDs derive from Ed25519 public-key fingerprints.
-- Registration, heartbeat, lease, completion, and failure bodies are signed.
-- Every mutable body field is signature-bound.
-- Requests outside a five-minute clock window are rejected.
-- Timestamps must increase, preventing replay after consumption.
-- Private keys are separate `0600` files; renderer JavaScript never receives them.
+- device IDs derive from Ed25519 SPKI fingerprints;
+- signed registration, heartbeat, lease, status, completion, and failure actions;
+- five-minute clock and strictly increasing consumed timestamp;
+- persistent revocation removes claims and cancels/requeues attempts;
+- private key is a separate `0600` file and never enters Electron renderer JavaScript;
+- Electron uses context isolation, sandbox, no Node integration, narrow preload API, blocked navigation, and CSP.
 
-An administrator can revoke a device ID, immediately remove its artifact claims, reject future signatures, and requeue its leased work. Key rotation still creates a new identity; a signed ownership-transfer protocol is not implemented.
+Key rotation remains a new identity; signed ownership transfer/recovery is not implemented.
 
-### False capacity
+### Cross-job state leakage
 
-- Desired assignments and hosted artifacts are separate tables.
-- A host claim must exactly match an active signed artifact.
-- Capacity uses signed-manifest artifact size, not arbitrary client bytes.
-- Routable expert coverage requires signed identity, live heartbeat, official artifact, readiness, and endpoint.
-- Worker leasing requires a matching active worker manifest marked ready.
+Every job creates a new llama context sequence and chat session. Session/context disposal runs in `finally`; model teardown waits for the serialized request queue. Only model weights remain shared. Tests assert separate contexts and disposal.
 
-Readiness remains self-attested. A malicious worker can load nothing and claim readiness. Remote challenge execution and result verification are still required.
+Residual risk: runtime/library bugs, GPU memory reuse below the API boundary, process compromise, or accidental plaintext worker logging. No confidential-computing claim is made.
 
-### Prompt and correction storage
+### False capacity and malicious output
 
-- Durable prompt/result/correction fields use AES-256-GCM.
-- `II_DATA_ENCRYPTION_KEY` is never stored in the database.
-- Receipt and lease tokens are stored as SHA-256 hashes.
-- Teaching intake rejects common emails, Indian phone numbers, Aadhaar-like numbers, private keys, API-key patterns, and bearer tokens before storage.
-- Teaching content is quarantined and never auto-trained.
-- Contributors can delete accepted intake with their receipt token.
+- desired assignments, hosted artifact claims, runtime readiness, and measured observations are distinct;
+- claim metadata must match an active signed artifact;
+- leasing requires exact manifest and readiness;
+- capacity/load/benchmark/region remain labelled self-declared;
+- deterministic challenges, duplicate hashes, bounded hedging, decay, and quarantine provide observations;
+- conflicts expose hashes, not plaintext, to normal admin listing.
 
-The coordinator decrypts prompts to lease them. A selected worker receives plaintext. This is not confidential computing or end-to-end encryption against workers.
+Two disagreeing workers do not reveal which is malicious, so both are temporarily quarantined. A coordinated Sybil group can still manipulate majority-style checks. Hardware attestation, stronger semantic verification, challenge secrecy/rotation, and identity/Sybil controls remain external work.
 
-### Electron
+### Durable private data
 
-- Renderer Node integration is disabled.
-- Context isolation and Chromium sandbox are enabled.
-- A narrow preload bridge exposes only four host operations.
-- External navigation is blocked; HTTPS links open in the OS browser.
-- CSP disallows inline renderer scripts.
+- jobs, results, attempt outputs, teachings, review notes, Dodo payloads, and push details use AES-256-GCM with row/context-specific AAD;
+- data key is not stored in SQLite;
+- tokens/correlations are hashed;
+- result metrics use a numeric allowlist;
+- logs and list routes avoid prompt/result/payment plaintext;
+- stronger contribution scanning rejects common direct identifiers/secrets before storage;
+- contributor withdrawal tombstones source text and stops affected rollout.
 
-### Public APIs
+The coordinator can decrypt work, and the selected worker sees its prompt. This is not end-to-end encryption against coordinator/workers. Published model weights cannot be selectively untrained by deleting a database row.
 
-- Model publication, revocation, and teaching metadata use `II_ADMIN_API_TOKEN`.
-- Genesis CSV export uses a separate `ADMIN_EXPORT_TOKEN`.
-- Job submission and teaching submission use separate bearer secrets.
-- Job/teaching reads require unguessable receipt tokens.
-- Registration is throttled by IP.
-- Request bodies are size-limited.
-- CSV export neutralizes spreadsheet formulas.
+### Browser vault/PWA
 
-## Important residual risks
+- PBKDF2-SHA-256 (310,000 iterations) derives a non-extractable AES-GCM key;
+- random salt/IV and per-record AAD;
+- passphrase/key not persisted;
+- API token in tab-scoped session storage;
+- service-worker static allowlist excludes all authenticated APIs;
+- rendered conversation text uses `textContent`.
 
-### Malicious workers
+Residual risk includes malicious same-origin script, compromised deployment/CDN, browser extension, unlocked device, weak passphrase, browser/OS bugs, and storage eviction. CSP and encryption at rest do not protect an unlocked active page from same-origin code.
 
-Workers can inspect prompts and return plausible garbage. Mitigations not yet implemented:
+### Peer transfer
 
-- deterministic canary challenges,
-- duplicate execution and comparison,
-- signed benchmark attestations,
-- output verification,
-- reputation with decay,
-- operator revocation lists,
-- hardware-backed attestation.
+- Ed25519 request authentication binds method/path/range/body hash, timestamp, and nonce;
+- replay cache and bootstrap-signed directory;
+- HTTPS except explicit loopback development;
+- bounded metadata/body/range/artifact size, concurrency, and peer-byte budget;
+- partial fsync/resume and final SHA-256;
+- corruption moves to rejected storage and emits a reputation event;
+- relays can fetch only discovered content-addressed peers.
 
-Never send secrets or unredacted private documents to an untrusted community worker.
+Residual risk: directory/relay availability, traffic analysis, disk exhaustion within configured limits, malicious-but-valid slow peers, Sybil reports, public endpoint abuse, and untested NAT. The local reference does not implement general SSRF-safe arbitrary URL fetch; operator bootstrap/relay/fallback configuration must remain trusted and HTTPS.
+
+### Identity, billing, and webhook handling
+
+- production passwordless tokens leave only through a configured delivery adapter; test return requires an explicit test flag;
+- scoped/expiring/revocable tokens stored as hashes;
+- authenticated checkout correlation uses an opaque secret stored as a hash;
+- Dodo signature covers exact raw body, message ID, and timestamp;
+- five-minute replay window and provider-event uniqueness/payload hash;
+- encrypted event payload, state transaction, audit, and fraud flags;
+- adverse refund/dispute states suspend entitlements.
+
+Residual risk: compromised email/delivery provider, Dodo account/key, metadata stripping on pre-created links, out-of-order provider events, reconciliation gaps, account takeover, chargeback abuse, tax/accounting errors, and legal obligations. Production needs live sandbox/reconciliation tests and operator review.
+
+### Learning/release gates
+
+- audited plaintext views;
+- scan repeated before approval/dataset use;
+- approved-only single-manifest dataset;
+- immutable content/provenance hash;
+- secret-scanned bounded training metadata;
+- benchmark/privacy/artifact gates;
+- distinct approval and signing transition;
+- staged rollout/rollback/withdrawal.
+
+External runners can lie in submitted evidence. Production must verify signed raw reports and artifact bytes independently. The scanner is not an anonymizer, and a human reviewer can mishandle plaintext.
+
+## Central residual risks
+
+### Coordinator/key compromise
+
+The coordinator holds data and provider secrets. Process compromise can decrypt work and alter state. Use secret management, least privilege, restricted admin access, consistent backups, restore tests, key rotation/re-encryption procedures, and independent audit.
 
 ### Metadata privacy
 
-The coordinator observes device IP, country, timing, model version, queue activity, and job sizes. Encryption at rest does not hide this metadata.
+IP, country/declared region, timing, manifest, queue/load, artifact, billing, and job-size metadata remain visible. Pseudonymous IP hashes still become personal data when linkable.
 
-### Coordinator compromise
+### Single-process SQLite
 
-The coordinator holds the data encryption key and can decrypt durable work. Production must use a secret manager, restricted service identity, backups, rotation, and audited access. A database backup without the key protects content; a process compromise with the key does not.
+WAL survived the automated process-kill test, but one coordinator is a failure/scale boundary. In-memory registration rate limits reset on restart. Multi-replica operation needs a shared transactional DB/queue, distributed rate limit, globally atomic attempts, revocation propagation, and tested disaster recovery.
 
-### NAT/public endpoint exposure
+### Sybil/Genesis
 
-Pull jobs require only outbound HTTPS. Direct `/route` expert endpoints require an operator-managed TLS reverse proxy and request authentication, which v0.3 does not yet provide. Do not expose port 7777 directly to the internet.
+A cryptographic identity is not one person/device. Genesis software qualification requires user plus verified first-400 host, but reward eligibility still requires legal identity, anti-fraud, uptime, terms, tax, and appeals policy.
 
-### Sybil and Genesis abuse
+### Dependency lifecycle
 
-Cryptographic identity does not equal one human or one physical machine. Genesis numbering and rewards require independent verification, uptime rules, revocation, and legal terms.
+The project constraint pins Express 4.19, Electron 28, and current native/runtime packages despite known advisory pressure. Production release management must review supported upgrades; do not blindly apply incompatible `npm audit --force` output.
 
-### SQLite and in-memory limits
+## Operational requirements
 
-The coordinator is a single failure domain. Registration rate limits are in memory and reset on restart. SQLite is appropriate for the current pilot, not a horizontally scaled public control plane.
+- keep release/adapter private keys offline or in protected signing infrastructure;
+- distribute trusted public keys out of band;
+- use distinct high-entropy secrets and synchronized clocks;
+- terminate TLS at trusted infrastructure with exact proxy/CORS policy;
+- never expose the loopback llama port directly;
+- back up DB/manifests/audit and test restore with corresponding keys;
+- rotate/re-encrypt deliberately—changing the data key alone destroys readability;
+- monitor signature, replay, conflict, challenge, expiry, webhook, quota, and fraud events without content;
+- maintain incident, model-removal, account/payment, contributor-withdrawal, and breach runbooks.
 
-### Dependency risk
+## Public-launch security gates
 
-The locked Electron 28 and Express 4.19 stack may have published advisories. They are retained for compatibility with the project constraint. Production release management must evaluate upgrades rather than applying unreviewed `npm audit --force` changes.
-
-## Key operations
-
-- Keep the release private key offline; sign manifests in a restricted release process.
-- Distribute the release public key out-of-band.
-- Rotate API and encryption credentials through a secret manager.
-- Back up the database and test restore.
-- Deactivate a compromised manifest immediately.
-- Revoke compromised host identities once a revocation endpoint exists; until then remove the device row and block it at the edge.
-- Never log plaintext jobs or teachings.
-
-## Security exit criteria for public launch
-
-- independent security review,
-- host-key rotation/recovery and a signed distributed revocation feed,
-- distributed rate limiting,
-- authenticated worker transport,
-- readiness/result verification,
-- Dodo webhook verification,
-- secret-manager deployment,
-- encrypted tested backups,
-- abuse response runbook,
-- India DPDP review and published privacy policy.
+Independent review, host key recovery, multi-coordinator revocation/rate limits, challenge/Sybil hardening, operated peer/relay review, verified training evidence, live Dodo/reconciliation, secret-manager deployment, encrypted restore proof, DPDP/privacy documentation, and abuse/support response remain mandatory.

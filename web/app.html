@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0a0c0b">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="II private AI workspace — encrypted local conversations and background jobs.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="II">
+  <meta name="ii-api-base" content="">
+  <meta name="ii-vapid-public-key" content="">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; media-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://checkout.dodopayments.com">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="icon" href="/icons/icon-192.png">
+  <title>II Workspace</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090b0a;
+      --surface: #111412;
+      --raised: #171b18;
+      --line: rgba(231, 242, 231, .11);
+      --text: #edf2ea;
+      --muted: #919a91;
+      --quiet: #687068;
+      --acid: #caff58;
+      --aqua: #70e7d9;
+      --warn: #ffbd6b;
+      --danger: #ff8d86;
+      --radius: 18px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 85% -10%, rgba(112, 231, 217, .08), transparent 32rem),
+        radial-gradient(circle at -5% 100%, rgba(202, 255, 88, .055), transparent 28rem),
+        var(--bg);
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid rgba(112, 231, 217, .45); outline-offset: 2px; }
+    .app-shell { min-height: 100dvh; display: grid; grid-template-rows: auto 1fr; }
+    .topbar {
+      position: sticky; top: 0; z-index: 20;
+      min-height: calc(68px + env(safe-area-inset-top));
+      padding: env(safe-area-inset-top) max(20px, env(safe-area-inset-right)) 0 max(20px, env(safe-area-inset-left));
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(9, 11, 10, .84); backdrop-filter: blur(20px);
+    }
+    .brand { display: flex; align-items: center; gap: 11px; font-weight: 740; letter-spacing: -.03em; }
+    .mark { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid rgba(202,255,88,.35); border-radius: 11px; color: var(--acid); background: rgba(202,255,88,.08); font: 800 14px/1 ui-monospace, monospace; }
+    .brand small { display: block; margin-top: 2px; color: var(--quiet); font: 500 9px/1.2 ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .network-pill { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font: 600 10px/1 ui-monospace, monospace; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--acid); box-shadow: 0 0 10px rgba(202,255,88,.4); }
+    .dot.offline { background: var(--warn); box-shadow: none; }
+    .icon-button, .small-button { min-height: 38px; padding: 0 13px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.025); cursor: pointer; font-size: 11px; font-weight: 680; }
+    .icon-button:hover, .small-button:hover { border-color: rgba(255,255,255,.22); background: rgba(255,255,255,.05); }
+    .workspace { width: min(1440px, 100%); margin: 0 auto; padding: 22px max(22px, env(safe-area-inset-right)) calc(28px + env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left)); display: grid; grid-template-columns: 280px minmax(0, 1fr) 300px; gap: 18px; }
+    .panel { border: 1px solid var(--line); border-radius: var(--radius); background: rgba(17,20,18,.78); box-shadow: 0 22px 70px rgba(0,0,0,.22); }
+    .sidebar { min-height: calc(100dvh - 113px); padding: 17px; display: flex; flex-direction: column; }
+    .eyebrow { color: var(--quiet); font: 700 9px/1 ui-monospace, monospace; letter-spacing: .13em; text-transform: uppercase; }
+    .new-chat { width: 100%; min-height: 44px; margin: 16px 0 19px; border: 0; border-radius: 12px; color: #121708; background: var(--acid); cursor: pointer; font-size: 11px; font-weight: 760; }
+    .conversation-list { display: grid; gap: 6px; }
+    .conversation-item { width: 100%; min-height: 48px; padding: 9px 10px; border: 1px solid transparent; border-radius: 11px; color: var(--muted); background: transparent; text-align: left; cursor: pointer; }
+    .conversation-item.active { border-color: var(--line); color: var(--text); background: var(--raised); }
+    .conversation-item strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .conversation-item span { display: block; margin-top: 5px; color: var(--quiet); font: 9px/1 ui-monospace, monospace; }
+    .privacy-note { margin-top: auto; padding: 13px; border: 1px solid rgba(112,231,217,.13); border-radius: 12px; color: var(--quiet); background: rgba(112,231,217,.025); font-size: 10px; line-height: 1.55; }
+    .privacy-note strong { color: var(--aqua); }
+    .chat { min-height: calc(100dvh - 113px); display: grid; grid-template-rows: auto minmax(320px, 1fr) auto; overflow: hidden; }
+    .chat-head { min-height: 68px; padding: 0 21px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); }
+    .chat-head h1 { margin: 0; font-size: 15px; letter-spacing: -.025em; }
+    .chat-head p { margin: 5px 0 0; color: var(--quiet); font-size: 9px; }
+    .mode-switch { padding: 4px; display: flex; border: 1px solid var(--line); border-radius: 10px; }
+    .mode-switch button { min-height: 30px; padding: 0 10px; border: 0; border-radius: 7px; color: var(--quiet); background: transparent; cursor: pointer; font: 650 9px/1 ui-monospace, monospace; }
+    .mode-switch button.active { color: var(--text); background: #242924; }
+    .messages { padding: 24px; overflow: auto; display: flex; flex-direction: column; gap: 16px; scroll-behavior: smooth; }
+    .empty { margin: auto; max-width: 470px; padding: 40px 20px; text-align: center; }
+    .empty-badge { width: 62px; height: 62px; margin: 0 auto 20px; display: grid; place-items: center; border: 1px solid rgba(202,255,88,.25); border-radius: 19px; color: var(--acid); background: rgba(202,255,88,.05); font: 800 20px/1 ui-monospace, monospace; }
+    .empty h2 { margin: 0; font-size: 26px; letter-spacing: -.055em; }
+    .empty p { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+    .message { max-width: min(720px, 88%); padding: 14px 16px; border: 1px solid var(--line); border-radius: 15px; font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .message.user { align-self: flex-end; border-color: rgba(202,255,88,.18); background: rgba(202,255,88,.055); }
+    .message.assistant { align-self: flex-start; background: var(--raised); }
+    .message.system { align-self: center; max-width: 94%; padding: 8px 12px; border-style: dashed; color: var(--quiet); background: transparent; font-size: 9px; font-family: ui-monospace, monospace; }
+    .message-meta { display: block; margin-top: 7px; color: var(--quiet); font: 8px/1 ui-monospace, monospace; }
+    .composer-wrap { padding: 16px; border-top: 1px solid var(--line); background: rgba(13,15,14,.82); }
+    .composer { padding: 8px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: end; gap: 8px; border: 1px solid var(--line); border-radius: 15px; background: #0c0f0d; }
+    .composer textarea { width: 100%; min-height: 42px; max-height: 150px; padding: 11px 4px 7px; resize: none; border: 0; color: var(--text); background: transparent; outline: 0; font-size: 12px; line-height: 1.45; }
+    .composer textarea::placeholder { color: #545b54; }
+    .voice-button, .send-button { width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); cursor: pointer; }
+    .voice-button.recording { border-color: var(--danger); color: var(--danger); animation: pulse 1s infinite; }
+    .send-button { border: 0; color: #101508; background: var(--acid); font-weight: 900; }
+    @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(255,141,134,.08); } }
+    .composer-note { margin: 8px 4px 0; display: flex; justify-content: space-between; gap: 14px; color: var(--quiet); font-size: 9px; line-height: 1.4; }
+    .inspector { padding: 17px; min-height: calc(100dvh - 113px); overflow: auto; }
+    .inspector h2 { margin: 7px 0 17px; font-size: 17px; letter-spacing: -.03em; }
+    .capabilities { display: grid; gap: 8px; }
+    .capability { min-height: 55px; padding: 11px 12px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.015); }
+    .capability strong { display: block; font-size: 10px; }
+    .capability span { display: block; margin-top: 5px; color: var(--quiet); font-size: 8px; line-height: 1.35; }
+    .status { padding: 5px 7px; border-radius: 999px; color: var(--quiet); background: rgba(255,255,255,.05); font: 700 8px/1 ui-monospace, monospace; text-transform: uppercase; }
+    .status.yes { color: var(--acid); background: rgba(202,255,88,.08); }
+    .status.warn { color: var(--warn); background: rgba(255,189,107,.08); }
+    .jobs-head { margin: 25px 0 10px; display: flex; align-items: center; justify-content: space-between; }
+    .jobs-head strong { font-size: 11px; }
+    .job-list { display: grid; gap: 7px; }
+    .job { padding: 11px; border: 1px solid var(--line); border-radius: 11px; }
+    .job-top { display: flex; justify-content: space-between; gap: 10px; font: 700 8px/1 ui-monospace, monospace; }
+    .job-id { max-width: 160px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+    .job p { margin: 8px 0 0; color: var(--quiet); font-size: 9px; line-height: 1.4; }
+    .truth { margin-top: 18px; padding: 12px; border: 1px solid rgba(255,189,107,.15); border-radius: 12px; color: #998a75; background: rgba(255,189,107,.035); font-size: 9px; line-height: 1.55; }
+    .modal-backdrop { position: fixed; inset: 0; z-index: 50; padding: 20px; display: grid; place-items: center; background: rgba(0,0,0,.72); backdrop-filter: blur(12px); }
+    .modal-backdrop[hidden] { display: none; }
+    .modal { width: min(440px, 100%); padding: 25px; border: 1px solid var(--line); border-radius: 22px; background: #121512; box-shadow: 0 30px 100px rgba(0,0,0,.5); }
+    .modal h2 { margin: 0; font-size: 23px; letter-spacing: -.045em; }
+    .modal p { color: var(--muted); font-size: 11px; line-height: 1.6; }
+    .field { margin-top: 14px; }
+    .field label { display: block; margin-bottom: 7px; color: var(--quiet); font: 700 8px/1 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .1em; }
+    .field input { width: 100%; min-height: 43px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); background: #0b0e0c; }
+    .modal-actions { margin-top: 18px; display: flex; justify-content: flex-end; gap: 8px; }
+    .primary { border-color: transparent; color: #101508; background: var(--acid); }
+    .error { min-height: 17px; margin-top: 10px; color: var(--danger); font-size: 9px; }
+    .toast { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 80; max-width: min(390px, calc(100% - 40px)); padding: 12px 15px; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: #1c211d; box-shadow: 0 18px 60px rgba(0,0,0,.4); font-size: 10px; }
+    .toast[hidden] { display: none; }
+    [hidden] { display: none !important; }
+    @media (max-width: 1100px) { .workspace { grid-template-columns: 230px minmax(0,1fr); } .inspector { grid-column: 1 / -1; min-height: auto; } .capabilities { grid-template-columns: repeat(3,1fr); } }
+    @media (max-width: 760px) {
+      .topbar { min-height: calc(61px + env(safe-area-inset-top)); }
+      .brand-copy, .network-pill span, #install-button { display: none; }
+      .workspace { padding: 10px 10px calc(12px + env(safe-area-inset-bottom)); display: block; }
+      .sidebar, .inspector { display: none; }
+      .chat { min-height: calc(100dvh - 82px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); border-radius: 15px; }
+      .chat-head { min-height: 58px; padding-inline: 14px; }
+      .messages { padding: 16px 13px; }
+      .message { max-width: 92%; }
+      .composer-wrap { padding: 10px; }
+      .composer-note span:last-child { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="mark">II</span><span class="brand-copy">Workspace<small>encrypted local shell</small></span></div>
+      <div class="top-actions">
+        <div class="network-pill"><i class="dot" id="network-dot"></i><span id="network-label">online</span></div>
+        <button class="small-button" id="install-button" hidden>Install</button>
+        <button class="icon-button" id="lock-button" aria-label="Lock encrypted workspace">Lock</button>
+        <button class="icon-button" id="settings-button" aria-label="Open connection settings">Settings</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="panel sidebar" aria-label="Conversations">
+        <span class="eyebrow">Conversations</span>
+        <button class="new-chat" id="new-chat">+ New encrypted chat</button>
+        <div class="conversation-list" id="conversation-list"></div>
+        <div class="privacy-note"><strong>Encrypted at rest.</strong><br>Conversation text is AES-GCM encrypted in this browser. Your passphrase and API token are not persisted.</div>
+      </aside>
+
+      <section class="panel chat" aria-label="AI conversation">
+        <div class="chat-head">
+          <div><h1 id="chat-title">Private workspace</h1><p id="chat-subtitle">Unlock to load encrypted conversations</p></div>
+          <div class="mode-switch" aria-label="Inference mode">
+            <button id="mode-local">Local</button>
+            <button id="mode-background" class="active">Background</button>
+          </div>
+        </div>
+        <div class="messages" id="messages">
+          <div class="empty" id="empty-state"><div class="empty-badge">II</div><h2>Think here. Keep control.</h2><p>Use a foreground local adapter when one is installed, or submit an encrypted-at-rest receipt for a verified background worker job.</p></div>
+        </div>
+        <div class="composer-wrap">
+          <form class="composer" id="composer">
+            <button class="voice-button" id="voice-button" type="button" aria-label="Hold to talk">●</button>
+            <textarea id="prompt" rows="1" maxlength="8000" placeholder="Ask II…" aria-label="Message"></textarea>
+            <button class="send-button" type="submit" aria-label="Send message">↑</button>
+          </form>
+          <div class="composer-note"><span id="mode-note">Background jobs continue at the coordinator; status checks resume while the app is open.</span><span>Shift + Enter for a new line</span></div>
+        </div>
+      </section>
+
+      <aside class="panel inspector" aria-label="Device capabilities and jobs">
+        <span class="eyebrow">This device</span><h2>Capability check</h2>
+        <div class="capabilities" id="capabilities"></div>
+        <div class="jobs-head"><strong>Background jobs</strong><button class="small-button" id="notify-button">Notify me</button></div>
+        <div class="job-list" id="job-list"><div class="job"><p>No encrypted job receipts loaded.</p></div></div>
+        <div class="truth">Browser mobile works while open. II does not claim reliable always-on wake word, screen-off microphone access, or background local inference on Android Chrome or iOS Safari.</div>
+      </aside>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="unlock-modal">
+    <form class="modal" id="unlock-form">
+      <span class="eyebrow">Local vault</span><h2>Unlock your workspace</h2>
+      <p id="unlock-copy">Choose a passphrase. It derives a local encryption key and is never sent or saved.</p>
+      <div class="field"><label for="vault-passphrase">Passphrase</label><input id="vault-passphrase" type="password" minlength="10" autocomplete="current-password" required></div>
+      <div class="error" id="unlock-error" role="alert"></div>
+      <div class="modal-actions"><button class="small-button primary" type="submit">Unlock</button></div>
+    </form>
+  </div>
+
+  <div class="modal-backdrop" id="settings-modal" hidden>
+    <form class="modal" id="settings-form">
+      <span class="eyebrow">Connection</span><h2>Coordinator settings</h2>
+      <p>Use the same origin by default. Tokens remain in this tab's session storage and are never written to IndexedDB.</p>
+      <div class="field"><label for="api-base">API base URL</label><input id="api-base" type="url" placeholder="Same origin"></div>
+      <div class="field"><label for="api-token">User access token</label><input id="api-token" type="password" autocomplete="off" placeholder="Paste a user token"></div>
+      <div class="field"><label for="manifest-id">Worker manifest ID</label><input id="manifest-id" type="text" minlength="64" maxlength="64" pattern="[a-f0-9]{64}" placeholder="64-character signed manifest ID"></div>
+      <div class="error" id="settings-error" role="alert"></div>
+      <div class="modal-actions"><button class="small-button" type="button" id="settings-cancel">Cancel</button><button class="small-button primary" type="submit">Save for this device</button></div>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" hidden role="status"></div>
+  <script src="/secure-store.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>

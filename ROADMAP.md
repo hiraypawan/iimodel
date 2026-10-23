@@ -1,139 +1,121 @@
 # II Product Roadmap
 
-This roadmap governs the decentralized worker + local Jarvis product. Nothing is complete merely because it appears in a README or database; every phase has a physical or automated exit criterion.
+Nothing is complete merely because a route or table exists. **Software-complete**, **locally tested**, and **externally proven** are separate states.
 
-## v0.3 — Trusted background worker foundation (implemented)
+## v0.4 — Reliability/product reference (implemented in software)
 
-- [x] Ed25519 host identity and signed mutable requests.
-- [x] Replay/clock-window checks.
-- [x] Publisher-signed model manifests.
-- [x] Exact manifest-backed host artifact claims.
-- [x] Separate desired assignments from hosted truth.
-- [x] Content-addressed artifact storage and HTTP resume.
-- [x] Complete-GGUF local inference or strict HTTP 503.
-- [x] Encrypted durable jobs with leases, retries, receipts, and cancellation.
-- [x] Pull workers that operate behind NAT.
-- [x] Explicit, encrypted, quarantined teaching intake with deletion.
-- [x] Sandboxed Electron renderer/preload boundary.
+Automated/local evidence now covers:
 
-Evidence: Node test suites exercise protocol tampering, migration, routing truth, encryption, job lifecycle, privacy rejection, physical file allocation/resume, and fail-closed inference.
+- [x] per-job llama context/session isolation;
+- [x] stronger contribution secret/PII scanning;
+- [x] user, identity, plan, checkout, subscription, entitlement, usage, audit, and fraud models;
+- [x] capability/load/declared-region scheduling;
+- [x] delayed hedging capped at two attempts and loser cancellation state;
+- [x] deterministic challenges, duplicate comparison, score decay, and quarantine;
+- [x] manifest-specific scores and artifact/region replica targets;
+- [x] worker churn, conflict, corruption, interruption, and coordinator restart chaos tests;
+- [x] Android/iOS/desktop browser PWA shell with encrypted local conversations;
+- [x] foreground push-to-talk and strict local-model adapter boundary;
+- [x] background job submission/status/notification UI;
+- [x] WebGPU/storage/microphone/memory capability checks;
+- [x] signed three-process local peer discovery/content/relay simulation;
+- [x] range resume, limits, corruption rejection, reputation log, and HTTP fallback;
+- [x] real two-process binary activation transport, measurements, and failure timing;
+- [x] authorized learning review console, provenance, immutable datasets, external-run metadata, gates, approval, signed publication, rollout/rollback, and withdrawal;
+- [x] passwordless identity boundary, correlated Dodo checkouts, Standard Webhooks verification, idempotent event storage, lifecycle state, quotas, Genesis qualification, audit, and fraud flags.
 
-Limit: no production model or physical Electron GUI/model run was available in the build sandbox.
+Local evidence does **not** close the gates below.
 
-## v0.4 — Production worker pilot
+## v0.4 pilot gates — external evidence required
 
-Build:
+- [ ] Select one exact legally redistributable Qwen-family worker GGUF from predeclared benchmarks.
+- [ ] Record checkpoint/tokenizer hashes, conversion/quantization procedure, license review, and model card.
+- [ ] Build and smoke-test signed Windows/macOS installers on clean machines.
+- [ ] Execute 1,000 controlled jobs across at least ten physical desktops; publish latency, completion, challenge, hedge, memory, power, and churn results.
+- [ ] Restore a backed-up production-like coordinator and rotate/recover a host key.
+- [ ] Validate Dodo test-mode checkout, signed webhook, renewal, cancellation, refund, and dispute deliveries end-to-end.
+- [ ] Complete tax, privacy, incident, support, Genesis eligibility, and reward-term review.
 
-- select one exact legally redistributable worker GGUF,
-- reproducible conversion/quantization record,
-- clean-machine installer,
-- remote readiness challenge jobs,
-- host key rotation/recovery and multi-coordinator revocation propagation,
-- queue/worker operational dashboard,
-- tested backup/restore,
-- signed update channel for the Electron client,
-- Dodo webhooks and subscription entitlements.
+Exit criterion: the pilot SLO and business lifecycle pass with real evidence; local tests alone are insufficient.
 
-Exit criterion: ten physical desktops complete 1,000 controlled jobs with published latency, failure, retry, memory, and power measurements; one host failure is recovered without data corruption.
+## v0.5 — Browser product validation and native voice decision
 
-## v0.5 — Offline phone reflex
+The PWA is implemented, but device claims require a matrix:
 
-Build:
+- [ ] install/update/offline-shell test on named Android Chrome, iOS Safari, Windows, and macOS versions;
+- [ ] microphone, speech interface, notification, storage eviction, WebGPU, memory pressure, and app-restoration results;
+- [ ] benchmark-selected foreground local model adapter on supported devices;
+- [ ] privacy/local/background policy usability tests;
+- [ ] determine whether product requirements need a native Android foreground service and offline STT/TTS.
 
-- Android shell,
-- signed phone artifact updater,
-- offline wake word, VAD, STT, TTS,
-- benchmark-selected small local model,
-- deterministic local actions,
-- local/private/background routing,
-- charging, Wi-Fi, metered data, storage, and privacy settings.
+Exit criterion: published device results. Browser mobile must not be represented as reliable for always-on wake word, screen-off capture, or screen-off inference.
 
-Exit criterion: named target Android devices complete the offline command suite with measured first-action/first-audio latency and screen-off/battery tests. Swarm outage cannot break local commands.
+## v0.6 — Operated peer distribution
 
-## v0.6 — Peer-assisted weight distribution
+The authenticated local reference is implemented. Production requires:
 
-Build:
+- [ ] deployed bootstrap identity/key rotation;
+- [ ] consent and upload controls in the desktop product;
+- [ ] operated relay capacity, abuse/rate policy, and observability;
+- [ ] representative Indian home broadband, CGNAT, mobile, IPv4, and IPv6 tests;
+- [ ] optional standard NAT traversal transport after dependency/security review;
+- [ ] signed multi-chunk/Merkle manifests for partial artifact upgrades.
 
-- signed per-chunk map/Merkle root,
-- missing-chunk deduplication,
-- authenticated peer transfer,
-- peer discovery,
-- NAT traversal and relay fallback,
-- upload limits and consent,
-- malicious/corrupt peer penalties,
-- controlled HTTPS fallback.
+Exit criterion: two real clients resume and verify only required bytes through direct, NAT, relay, and HTTPS paths while rejecting corruption.
 
-Exit criterion: two clients upgrade while fetching only missing chunks, reject a tampered peer chunk, resume interruption, and succeed behind representative Indian home/mobile NAT configurations.
+## v0.7 — Physical two-node Qwen proof
 
-## v0.7 — Distributed-runtime research
+The deterministic two-process transport reference is implemented. It is not model evidence.
 
-Build:
+- [ ] freeze an exact licensed 1B–3B checkpoint and tokenizer;
+- [ ] publish exact topology, dtype/quantization, activation shape, and KV ownership;
+- [ ] run one-device baseline;
+- [ ] run a runtime-supported split on two physical LAN machines;
+- [ ] record first-token latency, tokens/second, activation bytes/token, compute/transport time, RSS/VRAM, output comparison, cancellation, and stage failure;
+- [ ] compare capability and throughput with complete-model replication.
 
-- exact 1B–3B checkpoint and tensor topology,
-- one-device baseline,
-- two-desktop LAN runtime-supported split,
-- authenticated activation transport,
-- cancellation/backpressure,
-- failure recovery experiment,
-- complete published measurements.
+Exit criterion: a reproducible complete forward pass across two machines. This never becomes the instant voice path by default.
 
-Exit criterion: a reproducible physical run executes one complete model across two devices and compares first-token latency, tokens/second, bytes/token, memory, and recovery with one-device inference.
+## v0.8 — Production reliability
 
-This phase does not become the voice path.
+The single-coordinator algorithms are implemented locally. Production requires:
 
-## v0.8 — Reliable background swarm
+- [ ] measured thresholds for score deltas, decay, quarantine, hedging, and replica targets;
+- [ ] challenge corpus security and rotation;
+- [ ] multi-coordinator durable attempt arbitration and cancellation delivery;
+- [ ] backed-up, horizontally safe data store;
+- [ ] queue/worker/reputation operational dashboard and incident runbooks;
+- [ ] optional user-controlled cloud fallback.
 
-Build:
+Exit criterion: sustained controlled jobs meet published completion and latency SLOs through process, host, network, and region failure injection.
 
-- capability benchmarks,
-- placement by model/hardware/region/load,
-- replication targets from measured churn,
-- job-level hedging and loser cancellation,
-- worker reputation with decay,
-- duplicate/challenge result validation,
-- multi-coordinator durable storage/rate limits,
-- optional user-controlled cloud fallback.
+## v0.9 — Evidence-producing learning run
 
-Exit criterion: sustained controlled jobs meet a published completion SLO through injected churn and coordinator restart.
+The review/orchestration/publication control plane is implemented. External work remains:
 
-## v0.9 — Learning flywheel
+- [ ] legally reviewed, consented dataset content;
+- [ ] deduplication and language/domain review at operating scale;
+- [ ] real GPU adapter training against the exact base hash;
+- [ ] predeclared Hindi/Marathi/Hinglish/English capability and safety suites;
+- [ ] memorization, extraction, and membership-inference evaluation;
+- [ ] human release approval with protected signing key;
+- [ ] canary monitoring and rollback rehearsal;
+- [ ] derived-data handling decision for contributor withdrawal.
 
-Build:
-
-- authorized review console,
-- stronger PII/secret scanning,
-- deduplication/provenance,
-- exact-base adapter training pipeline,
-- Hindi/Marathi/Hinglish and domain benchmark suites,
-- safety and privacy extraction gates,
-- signed candidate adapter registry,
-- staged rollout and rollback,
-- contributor consent withdrawal through derived-data policy.
-
-Exit criterion: one adapter improves a predeclared target with confidence, passes all non-regression/privacy gates, retains traceable consent, and is safely rolled back in rehearsal.
-
-No automatic user-adapter merge is planned before that evidence.
+Exit criterion: one real adapter improves a predeclared target with confidence, passes every non-regression/privacy gate, retains traceable consent, and is safely rolled back in rehearsal.
 
 ## v1.0 — Public product gate
 
 Required:
 
-- Android local voice release,
-- stable background worker service,
-- production subscription entitlement system,
-- host/result abuse controls,
-- independent security review,
-- DPDP/privacy/legal documentation,
-- Genesis eligibility and reward terms,
-- incident and support operations,
+- verified PWA/native client matrix;
+- exact signed production checkpoint releases;
+- stable background worker service and abuse controls;
+- live subscription entitlement/reconciliation operation;
+- independent security/privacy review;
+- DPDP and jurisdiction-specific legal documentation;
+- Genesis eligibility/reward terms;
+- incident, support, backup, and model-removal procedures;
 - measured product SLOs.
 
-A 20-device/full-MoE-copy claim additionally requires an exact tensor topology and successful complete forward pass across physical hosts. It is not a prerequisite for delivering useful background jobs through complete-model workers.
-
-## Decisions intentionally deferred
-
-- Exact Qwen/DeepSeek/other checkpoints until license and target-device benchmarks are reviewed.
-- Blockchain/token incentives until legal and Sybil concerns are solved.
-- Phone WAN hosting until local voice is stable and battery/network evidence exists.
-- Remote MoE execution until shared-backbone and per-layer expert protocol is proven.
-- Fully decentralized control until central protocol, revocation, billing, and abuse response are production-safe.
+A “20 executable MoE copies” claim additionally requires exact tensor topology and physical complete-forward-pass evidence. Storage arithmetic or expert-map coverage is never sufficient.

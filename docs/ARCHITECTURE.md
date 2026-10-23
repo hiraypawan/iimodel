@@ -1,7 +1,7 @@
 # Historical local/BYOK engine architecture
 
-> This describes the retained Python tool engine, not the v0.3 decentralized
-> worker network. See [`NETWORK-ARCHITECTURE.md`](./NETWORK-ARCHITECTURE.md)
+> This describes the retained Python tool engine, not the v0.4 worker/PWA
+> product. See [`NETWORK-ARCHITECTURE.md`](./NETWORK-ARCHITECTURE.md)
 > for host identities, signed releases, encrypted jobs, and worker execution.
 
 II combines a local tool engine with an optional OpenAI-compatible BYOK

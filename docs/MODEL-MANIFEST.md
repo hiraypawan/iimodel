@@ -9,7 +9,7 @@
 - record runtime/role compatibility,
 - separate release authorization from host self-reporting,
 - provide a stable unit for jobs and learning contributions,
-- support content-addressed storage and future peer transfer.
+- support content-addressed storage and authenticated local-reference peer transfer.
 
 ## Required payload
 
@@ -44,7 +44,7 @@ Roles:
 - `expert`: one model-topology artifact with required `expert_id`,
 - `phone`: local mobile artifact; not a desktop worker claim.
 
-Formats currently recognized by the protocol are `gguf`, `safetensors`, `mlc`, and `other`. Recognition is not runtime support. v0.3 executes compatible GGUF only.
+Formats currently recognized by the protocol are `gguf`, `safetensors`, `mlc`, and `other`. Recognition is not runtime support. v0.4 desktop inference executes compatible complete GGUF only.
 
 ## Signature envelope
 
